@@ -37,4 +37,8 @@ In the publisher terminal, use the format:
 
 - Support for multiple subscribers
 - Topic-based message filtering
-- Real-time message delivery
+x Support for multiple publishers
+x subscribers to discover new publishers
+x publishers clean up missing subscribers 
+x subscriber queues
+
