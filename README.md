@@ -10,6 +10,10 @@ A simple publish-subscribe message queue implementation in C.
 ## Building
 
 ```bash
+# Run make to compile them both
+make
+
+# Or compile them separately
 # Compile the publisher
 gcc -o publisher publisher.c
 
