@@ -267,7 +267,7 @@ int main() {
     pthread_detach(listener_thread); // auto-cleanup thread when it exits
     run_publisher_loop(server_sock, subs);// input publisher loop
 
-
+    free(subset);
     close(server_sock);
     close(hb_sock);
     return 0;
