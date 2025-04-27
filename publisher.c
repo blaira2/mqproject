@@ -6,34 +6,161 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
+#include <pthread.h>
+#include <fcntl.h>
 
 #define MAX_SUBS 64
 #define MAX_TOPIC_LEN 128
 #define MAX_BUFFER_SIZE 1024
-#define PORT 5555
+#define DEFAULT_PORT 5555
+#define HEARTBEAT_PORT 5554
+
 
 typedef struct {
-    int sock;
+    int tcp_sock;  // TCP socket file descriptor
+    uint32_t ip_addr; // IP address received via heartbeat
     char topic[MAX_TOPIC_LEN];
     int topic_received;
+    time_t last_heartbeat;
 } subscriber_t;
+
+typedef struct {
+    int socket; //publisher socket
+    subscriber_t *subs;
+} subs_t;
+
+
 
 void send_topic_request(int client_sock) {
     const char *msg = "REQ_TOPIC\n";
     send(client_sock, msg, strlen(msg), 0);
 }
 
+
 void remove_subscriber(subscriber_t *subs, int i) {
-    printf("[PUB] Subscriber disconnected: fd=%d\n", subs[i].sock);
-    close(subs[i].sock);
-    subs[i].sock = -1;
+    printf("[PUB] Subscriber disconnected: fd=%d\n", subs[i].tcp_sock);
+    close(subs[i].tcp_sock);
+    subs[i].tcp_sock = -1;
     subs[i].topic[0] = 0;
     subs[i].topic_received = 0;
 }
 
+int connect_to_subscriber(uint32_t ip_addr) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return -1;
+    }
+
+    struct sockaddr_in sub_addr;
+    memset(&sub_addr, 0, sizeof(sub_addr));
+    sub_addr.sin_family = AF_INET;
+    sub_addr.sin_port = htons(DEFAULT_PORT);
+    sub_addr.sin_addr.s_addr = ip_addr;
+
+    if (connect(sock, (struct sockaddr *)&sub_addr, sizeof(sub_addr)) < 0) {
+        perror("connect to subscriber");
+        close(sock);
+        return -1;
+    }
+
+    return sock;
+}
+
+void handle_messaging(subscriber_t *subs) {
+    char input[MAX_BUFFER_SIZE] = {0};
+
+    if (!fgets(input, sizeof(input), stdin)) {
+        return;
+    }
+
+    char *topic = strtok(input, " ");
+    char *msg = strtok(NULL, "\n");
+
+    if (!topic || !msg) {
+        printf("Usage: <topic> <message>\n");
+        return;
+    }
+
+    for (int i = 0; i < MAX_SUBS; i++) {
+        if (subs[i].tcp_sock != -1 && subs[i].topic_received &&
+            strncmp(subs[i].topic, topic, strlen(topic)) == 0) {
+            send(subs[i].tcp_sock, msg, strlen(msg), 0);
+            printf("[PUB] Sent to subscriber (slot %d) '%s'\n", i, msg);
+        }
+    }
+}
+
+
+//broadcast listen
+void *subscription_listener_thread(void *arg) {
+    subs_t *subset = (subs_t *)arg;
+    int hb_sock = subset->socket;
+    subscriber_t *subs = subset->subs;
+
+    struct sockaddr_in src_addr;
+    socklen_t addr_len;
+    char hb_buffer[512];
+
+    printf("[PUB] Heartbeat listener thread started.\n");
+    while (1) {
+        addr_len = sizeof(src_addr);
+        int bytes = recvfrom(hb_sock, hb_buffer, sizeof(hb_buffer) - 1, 0,
+                             (struct sockaddr *)&src_addr, &addr_len);
+
+        if (bytes < 0) {
+            perror("[PUB] recvfrom error");
+            sleep(1);
+            continue;
+        }
+        else if (bytes == 0) {
+            //ignore
+            continue; 
+        }
+
+        hb_buffer[bytes] = '\0';
+        printf("[PUB] Received heartbeat: %s\n", hb_buffer);
+
+        uint32_t sender_ip = src_addr.sin_addr.s_addr;
+
+        // Check if subscriber already exists
+        int found = 0;
+        for (int i = 0; i < MAX_SUBS; i++) {
+            if (subs[i].ip_addr != 0 && subs[i].ip_addr == sender_ip) {
+                subs[i].last_heartbeat = time(NULL);
+                found = 1;
+                break;
+            }
+        }
+
+        if (!found) { // New subscriber
+            for (int i = 0; i < MAX_SUBS; i++) {
+                if (subs[i].ip_addr == 0) { // empty slot
+                    subs[i].ip_addr = sender_ip;
+                    subs[i].last_heartbeat = time(NULL);
+                    subs[i].topic_received = 0;
+                    int new_sock = connect_to_subscriber(sender_ip);
+                    if (new_sock >= 0) {
+                        subs[i].tcp_sock = new_sock;
+                        printf("[PUB] Connected to subscriber %s\n", inet_ntoa(*(struct in_addr *)&sender_ip));
+                    } else {
+                        printf("[PUB] Failed to make TCP connection to subscriber %s\n", inet_ntoa(*(struct in_addr *)&sender_ip));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    printf("[PUB] Exiting heartbeat listener thread.\n");
+    free(subset); // Only if you malloc'd it
+    return NULL;
+}
+
+
+
 void run_publisher_loop(int server_sock, subscriber_t *subs) {
     fd_set read_fds;
-    char input[MAX_BUFFER_SIZE];
 
     while (1) {
         FD_ZERO(&read_fds);
@@ -41,14 +168,18 @@ void run_publisher_loop(int server_sock, subscriber_t *subs) {
         int max_fd = server_sock;
 
         for (int i = 0; i < MAX_SUBS; i++) {
-            if (subs[i].sock != -1) {
-                FD_SET(subs[i].sock, &read_fds);
-                if (subs[i].sock > max_fd) max_fd = subs[i].sock;
+            if (subs[i].tcp_sock != -1) {
+                FD_SET(subs[i].tcp_sock, &read_fds);
+                if (subs[i].tcp_sock > max_fd) {
+                    max_fd = subs[i].tcp_sock;
+                }
             }
         }
 
         FD_SET(STDIN_FILENO, &read_fds);
-        if (STDIN_FILENO > max_fd) max_fd = STDIN_FILENO;
+        if (STDIN_FILENO > max_fd) {
+            max_fd = STDIN_FILENO;
+        }
 
         if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) < 0) {
             perror("select");
@@ -56,76 +187,17 @@ void run_publisher_loop(int server_sock, subscriber_t *subs) {
         }
 
         if (FD_ISSET(server_sock, &read_fds)) {
-            // New subscriber
-            int client_sock = accept(server_sock, NULL, NULL);
-            if (client_sock < 0) {
-                perror("accept");
-                continue;
-            }
-
-            int inserted = 0;
-            for (int i = 0; i < MAX_SUBS; i++) {
-                if (subs[i].sock == -1) {
-                    subs[i].sock = client_sock;
-                    subs[i].topic_received = 0;
-                    send_topic_request(client_sock);
-                    printf("[PUB] New subscriber fd=%d\n", client_sock);
-                    inserted = 1;
-                    break;
-                }
-            }
-            if (!inserted) {
-                printf("[PUB] Too many subscribers. Rejecting fd=%d\n", client_sock);
-                close(client_sock);
-            }
-        }
-
-        for (int i = 0; i < MAX_SUBS; i++) {
-            if (subs[i].sock != -1 && FD_ISSET(subs[i].sock, &read_fds)) {
-                if (!subs[i].topic_received) {
-                    // Expect topic response
-                    char topic_buf[MAX_TOPIC_LEN] = {0};
-                    int n = recv(subs[i].sock, topic_buf, sizeof(topic_buf) - 1, 0);
-                    if (n <= 0) {
-                        remove_subscriber(subs, i);
-                    } else {
-                        topic_buf[n] = '\0';
-                        strncpy(subs[i].topic, topic_buf, MAX_TOPIC_LEN);
-                        subs[i].topic_received = 1;
-                        printf("[PUB] Subscriber fd=%d subscribed to '%s'\n", subs[i].sock, subs[i].topic);
-                    }
-                } else {
-                    // Unexpected message
-                    char dump[256];
-                    recv(subs[i].sock, dump, sizeof(dump), 0); // just discard
-                }
-            }
+            //don't accept incoming TCP
         }
 
         if (FD_ISSET(STDIN_FILENO, &read_fds)) {
-            // Read from user: format = <topic> <message>
-            memset(input, 0, sizeof(input));
-            if (!fgets(input, sizeof(input), stdin)) continue;
-
-            char *topic = strtok(input, " ");
-            char *msg = strtok(NULL, "\n");
-            if (!topic || !msg) {
-                printf("Usage: <topic> <message>\n");
-                continue;
-            }
-
-            for (int i = 0; i < MAX_SUBS; i++) {
-                if (subs[i].sock != -1 && subs[i].topic_received &&
-                    strncmp(subs[i].topic, topic, strlen(topic)) == 0) {
-                    send(subs[i].sock, msg, strlen(msg), 0);
-                    printf("[PUB] Sent to fd=%d: '%s'\n", subs[i].sock, msg);
-                }
-            }
+            handle_messaging(subs);
         }
     }
 }
 
 int main() {
+    // Setup TCP socket for publishing messages
     int server_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (server_sock < 0) {
         perror("socket");
@@ -138,7 +210,7 @@ int main() {
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_addr.s_addr = INADDR_ANY,
-        .sin_port = htons(PORT),
+        .sin_port = htons(DEFAULT_PORT),
     };
 
     if (bind(server_sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -147,13 +219,56 @@ int main() {
     }
 
     listen(server_sock, MAX_SUBS);
-    printf("[PUB] Listening on port %d...\n", PORT);
+    printf("[PUB] Listening on port %d...\n", DEFAULT_PORT);
 
+    // Setup UDP heartbeat socket for listening for subscribers
+    int hb_sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (hb_sock < 0) {
+        perror("heartbeat socket");
+        return 1;
+    }
+
+    setsockopt(hb_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(hb_sock, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt)); // allow broadcast reception
+
+    struct sockaddr_in hb_addr = {
+        .sin_family = AF_INET,
+        .sin_addr.s_addr = INADDR_ANY, 
+        .sin_port = htons(HEARTBEAT_PORT),
+    };
+
+    if (bind(hb_sock, (struct sockaddr *)&hb_addr, sizeof(hb_addr)) < 0) {
+        perror("heartbeat bind");
+        return 1;
+    }
+
+    // Initialize subscribers list
     subscriber_t subs[MAX_SUBS];
-    for (int i = 0; i < MAX_SUBS; i++) subs[i].sock = -1;
+    for (int i = 0; i < MAX_SUBS; i++) {
+        subs[i].tcp_sock = -1;
+    }
 
-    run_publisher_loop(server_sock, subs);
+    // Allocate and set up subscription listener
+    subs_t *subset = malloc(sizeof(subs_t));
+    if (!subset) {
+        perror("malloc");
+        return 1;
+    }
+    subset->socket = hb_sock;
+    subset->subs = subs;
+
+    pthread_t listener_thread;
+    if (pthread_create(&listener_thread, NULL, subscription_listener_thread, subset) != 0) {
+        perror("pthread_create");
+        free(subset);
+        return 1;
+    }
+
+    pthread_detach(listener_thread); // auto-cleanup thread when it exits
+    run_publisher_loop(server_sock, subs);// input publisher loop
+
 
     close(server_sock);
+    close(hb_sock);
     return 0;
 }
