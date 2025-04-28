@@ -13,7 +13,7 @@
 
 #define PORT 5555
 #define MAX_SUBS 64
-#define MAX_TOPIC_LEN 128
+#define MAX_TOPIC_LEN 512
 #define MAX_BUFFER_SIZE 1024
 #define HEARTBEAT_PORT 5554
 
@@ -85,6 +85,14 @@ int add_write_request(struct request* req) {
     io_uring_prep_writev(sqe, req->client_socket, req->iov, req->iovec_count, 0);
     io_uring_sqe_set_data(sqe, req);
     return io_uring_submit(&ring);
+}
+
+//generate (random topic) headers and body for a request
+void generate_request_data(char** headers, char** body){
+    char* new_headers = "{toplevel}";
+    if(headers != NULL){
+        *headers = new_headers;
+    }
 }
 
 //
@@ -186,8 +194,15 @@ int main(int argc, char* argv){
 
     printf("[PUB] Listening on port %d...\n",PORT);
 
+    //Array mapping subscriber fds to topics
+    char subscriber_topics[MAX_SUBS + 5][MAX_TOPIC_LEN] = {0};
+
     int ret = 0;
     while(running){
+        /*
+        Todo:
+        configure headers correctly (as in send_headers())
+        */
         //wait for completion queue entries
         ret = io_uring_wait_cqe(&ring, &cqe);
         if (ret < 0) {
@@ -209,7 +224,6 @@ int main(int argc, char* argv){
 
         switch (req->event_type) {
             case EVENT_TYPE_ACCEPT:
-                puts("accept");
                 if(add_accept_request(server_fd, &client_addr, &client_addr_len) < 0){
                     fprintf(stderr, "add_accept_request failed: %s\n",strerror(errno));
                     exit(EXIT_FAILURE);
@@ -225,7 +239,8 @@ int main(int argc, char* argv){
             case EVENT_TYPE_READ:
                 // io_uring_peek_cqe(&ring,&cqe);
                 printf("Request received (socket %d):\n%s\n",req->client_socket,(char*)req->iov[0].iov_base);
-                // puts("read");
+                memcpy(subscriber_topics[req->client_socket],(char*)req->iov[0].iov_base,MAX_TOPIC_LEN);
+                // printf("subscriber_topics[%d]: %s\n",req->client_socket,subscriber_topics[req->client_socket]);
                 //if the client closed the connection, we don't want to add a new write request,
                 //since we can't use that socket/fd (it was just closed).
                 if (cqe->res == 0) {    //read returns 0 (end of file)
@@ -238,12 +253,14 @@ int main(int argc, char* argv){
                 //create new (write) request to add to queue
                 //we've received the request, now we're sending the response
                 struct request* write_req = malloc(sizeof(struct request) + sizeof(struct iovec));
-                unsigned long slen = strlen(RESPONSE);
+                char* headers = "{old}";
+                generate_request_data(&headers,NULL);
+                unsigned long slen = strlen(headers);
                 write_req->iovec_count = 1;
                 write_req->client_socket = req->client_socket;
                 write_req->iov[0].iov_base = malloc(slen);
                 write_req->iov[0].iov_len = slen;
-                memcpy(write_req->iov[0].iov_base, RESPONSE, slen);
+                memcpy(write_req->iov[0].iov_base, headers, slen);
                 //once we've read the request, we can add a new write request to the queue
                 if(add_write_request(write_req) < 0){
                     fprintf(stderr, "add_write_request failed: %s\n",strerror(errno));
@@ -267,6 +284,12 @@ int main(int argc, char* argv){
             default:
                 puts("Other event case");
                 break;
+        }
+
+        for(int i = 0; i < MAX_SUBS + 5; i++){
+            if(strcmp(subscriber_topics[i],"") != 0){
+                // printf("subscriber_topics[%d]:\n%s\n",i,subscriber_topics[i]);
+            }
         }
        
         //Mark this request as processed

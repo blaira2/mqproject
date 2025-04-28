@@ -113,7 +113,7 @@ void *heartbeat_thread(void *arg){
             perror("Failed to beat.");
         }
         else{
-            printf("[SUB] beat.\n");////
+            //printf("[SUB] beat.\n");////
         }
         sleep(HEARTBEAT_INTERVAL);
     }
