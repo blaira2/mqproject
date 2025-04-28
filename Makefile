@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS=-g
 LDFLAGS=-luring
-MAKEFLAGS=-j8
+MAKEFLAGS=-j$(nproc)
 
 SUB=subscriber
 PUB=publisher

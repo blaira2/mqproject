@@ -87,8 +87,48 @@ int add_write_request(struct request* req) {
     return io_uring_submit(&ring);
 }
 
+//
+void parse_response(){
+    /*
+    Idea:
+    - the publisher would publish new messages at random, each under various topics
+    - When publisher starts, it has a "clean slate"
+    - subscribers need to register with the publisher by sending a request
+        formatted a certain way (e.g. topics to subscribe to)
+    - each new registered subscriber gets an id (file descriptor?)
+    - add_write_request would only submit entries to the queue for the applicable subscription requests
+        (req->client_socket) client_socket would be the applicable subscriber
+    - add_write_request would also take a message topic string
+        it uses this to determine which subscribers to send the message to
+        When a message needs to be sent:
+            go through the list of known subscribers and their topic strings
+            select only those subscribers whose topic string satisfies a match with the new message
+            call io_uring_prep_writev and io_uring_sqe_set_data in a for loop for all the matching subscribers
+    - ideally, a mapping would be stored. 
+        Create a 2D array. Map a topic string to an array of subscriber ids/fds
+
+    -topic format (header):
+
+    1. {toplevel} -> subscribe to everything under a certain toplevel
+    2. {toplevel:child1} -> subscribe only to child1 from toplevel
+    3. {toplevel:child1:grandchild1} -> subscribe only to grandchild1
+    4. {toplevel:child1,child2} -> subscribe to child1 and child2
+    5. {toplevel:child1,child2:grandchild3} -> subscribe to child1 and the 3rd child of child2
+    (This is what the subscriber sends to update its subscription)
+
+    (new message to be sent):
+    {toplevel:child2}
+
+    entries 1 and 4 get this message
+    check for "{toplevel}" and ( "child2}" or "child2," )
+
+    This might require that every topic and subtopic name be unique
+
+    */
+}
+
 int main(int argc, char* argv){
-    int hb_sock;    
+    int server_fd;    
     struct sockaddr_in address = {
         .sin_family = AF_INET,
         .sin_addr.s_addr = INADDR_ANY,
@@ -96,22 +136,22 @@ int main(int argc, char* argv){
     };
     int opt = 1;
 
-    if((hb_sock = socket(AF_INET, SOCK_STREAM, 0)) == -1){
+    if((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
         perror("socket failed");
         exit(EXIT_FAILURE);
     }
 
-    if (setsockopt(hb_sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT | SO_BROADCAST, &opt, sizeof(opt)) < 0) {
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT | SO_BROADCAST, &opt, sizeof(opt)) < 0) {
         perror("setsockopt failed");
         exit(EXIT_FAILURE);
     }
 
-    if (bind(hb_sock, (struct sockaddr*)&address, sizeof(address)) < 0) {
+    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
         perror("bind failed");
         exit(EXIT_FAILURE);
     }
 
-    if (listen(hb_sock, 200) < 0) {
+    if (listen(server_fd, 200) < 0) {
         perror("listen failed");
         exit(EXIT_FAILURE);
     }
@@ -128,7 +168,7 @@ int main(int argc, char* argv){
         perror("malloc");
         return 1;
     }
-    subset->socket = hb_sock;
+    subset->socket = server_fd;
     subset->subs = subs;
     signal(SIGINT,sigint_handler);
 
@@ -139,7 +179,7 @@ int main(int argc, char* argv){
     socklen_t client_addr_len = sizeof(client_addr);
 
     //we first need to accept the server's request
-    if(add_accept_request(hb_sock, (struct sockaddr_in*)&client_addr, &client_addr_len) < 0){
+    if(add_accept_request(server_fd, (struct sockaddr_in*)&client_addr, &client_addr_len) < 0){
         fprintf(stderr, "add_accept_request failed: %s\n",strerror(errno));
         exit(EXIT_FAILURE);
     }
@@ -161,7 +201,7 @@ int main(int argc, char* argv){
         switch (req->event_type) {
             case EVENT_TYPE_ACCEPT:
                 // puts("accept");
-                if(add_accept_request(hb_sock, &client_addr, &client_addr_len) < 0){
+                if(add_accept_request(server_fd, &client_addr, &client_addr_len) < 0){
                     fprintf(stderr, "add_accept_request failed: %s\n",strerror(errno));
                     exit(EXIT_FAILURE);
                 }
@@ -174,6 +214,8 @@ int main(int argc, char* argv){
                 free(req);
                 break;
             case EVENT_TYPE_READ:
+                // io_uring_peek_cqe(&ring,&cqe);
+                printf("Request received:\n%s\n",(char*)req->iov[0].iov_base);
                 // puts("read");
                 //if the client closed the connection, we don't want to add a new write request,
                 //since we can't use that socket/fd (it was just closed).
@@ -185,7 +227,8 @@ int main(int argc, char* argv){
                     break;
                 }
                 //create new (write) request to add to queue
-                struct request* write_req = malloc(sizeof(*write_req) + sizeof(struct iovec));
+                //we've received the request, now we're sending the response
+                struct request* write_req = malloc(sizeof(struct request) + sizeof(struct iovec));
                 unsigned long slen = strlen(RESPONSE);
                 write_req->iovec_count = 1;
                 write_req->client_socket = req->client_socket;
@@ -201,7 +244,7 @@ int main(int argc, char* argv){
                 free(req);
                 break;
             case EVENT_TYPE_WRITE:
-                // puts("write");
+                printf("Sending response:\n%s\n",(char*)req->iov[0].iov_base);
                 //add_write_request(req);
                 if(add_read_request(req->client_socket) < 0){
                     fprintf(stderr, "add_read_request failed: %s\n",strerror(errno));
@@ -213,7 +256,7 @@ int main(int argc, char* argv){
                 free(req);
                 break;
             default:
-                // puts("Other event case");
+                puts("Other event case");
                 break;
         }
        
