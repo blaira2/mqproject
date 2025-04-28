@@ -24,6 +24,9 @@
 #define EVENT_TYPE_READ         1
 #define EVENT_TYPE_WRITE        2
 
+#define RESPONSE "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-length:15\r\n\r\nHello, world!\r\n"
+
+
 volatile int running = 1;
 void sigint_handler(){
     running = 0;
@@ -113,8 +116,6 @@ int main(int argc, char* argv){
         exit(EXIT_FAILURE);
     }
 
-    printf("[PUB] Listening on port %d...\n",PORT);
-
     // Initialize subscribers list
     subscriber_t subs[MAX_SUBS];
     for (int i = 0; i < MAX_SUBS; i++) {
@@ -134,6 +135,17 @@ int main(int argc, char* argv){
     //io_uring setup
     struct io_uring_cqe* cqe;
     io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+
+    //we first need to accept the server's request
+    if(add_accept_request(hb_sock, (struct sockaddr_in*)&client_addr, &client_addr_len) < 0){
+        fprintf(stderr, "add_accept_request failed: %s\n",strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    printf("[PUB] Listening on port %d...\n",PORT);
+
     int ret = 0;
     while(running){
         //wait for completion queue entries
@@ -146,6 +158,67 @@ int main(int argc, char* argv){
         if (cqe->res < 0) { //return value for this event
             continue;
         }
+        switch (req->event_type) {
+            case EVENT_TYPE_ACCEPT:
+                // puts("accept");
+                if(add_accept_request(hb_sock, &client_addr, &client_addr_len) < 0){
+                    fprintf(stderr, "add_accept_request failed: %s\n",strerror(errno));
+                    exit(EXIT_FAILURE);
+                }
+                //we've accepted the request, so now we need to read it
+                if(add_read_request(cqe->res) < 0){
+                    fprintf(stderr, "add_read_request failed: %s\n",strerror(errno));
+                    exit(EXIT_FAILURE);
+                }
+                //Once we handle the action for a request, we don't need it anymore, so we free it
+                free(req);
+                break;
+            case EVENT_TYPE_READ:
+                // puts("read");
+                //if the client closed the connection, we don't want to add a new write request,
+                //since we can't use that socket/fd (it was just closed).
+                if (cqe->res == 0) {    //read returns 0 (end of file)
+                    // printf("Client disconnected. Closing socket %d\n", req->client_socket);
+                    close(req->client_socket);
+                    free(req->iov[0].iov_base);
+                    free(req);
+                    break;
+                }
+                //create new (write) request to add to queue
+                struct request* write_req = malloc(sizeof(*write_req) + sizeof(struct iovec));
+                unsigned long slen = strlen(RESPONSE);
+                write_req->iovec_count = 1;
+                write_req->client_socket = req->client_socket;
+                write_req->iov[0].iov_base = malloc(slen);
+                write_req->iov[0].iov_len = slen;
+                memcpy(write_req->iov[0].iov_base, RESPONSE, slen);
+                //once we've read the request, we can add a new write request to the queue
+                if(add_write_request(write_req) < 0){
+                    fprintf(stderr, "add_write_request failed: %s\n",strerror(errno));
+                    exit(EXIT_FAILURE);
+                }
+                free(req->iov[0].iov_base);
+                free(req);
+                break;
+            case EVENT_TYPE_WRITE:
+                // puts("write");
+                //add_write_request(req);
+                if(add_read_request(req->client_socket) < 0){
+                    fprintf(stderr, "add_read_request failed: %s\n",strerror(errno));
+                    exit(EXIT_FAILURE);
+                }
+                for (int i = 0; i < req->iovec_count; i++) {
+                    free(req->iov[i].iov_base);
+                }
+                free(req);
+                break;
+            default:
+                // puts("Other event case");
+                break;
+        }
+       
+        //Mark this request as processed
+        io_uring_cqe_seen(&ring, cqe);
     }
 
     free(subset);
