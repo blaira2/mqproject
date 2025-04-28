@@ -46,7 +46,24 @@ int connect_to_publisher(const char *ip, int port) {
         exit(1);
     }
 
+    // char* test = "w";
+    // if(send(sock,test,strlen(test),0) < 0){
+    //     perror("send");
+    //     close(sock);
+    //     exit(1);
+    // }
+
     return sock;
+}
+
+//send initial subscription message to publisher
+int subscribe(int sock, const char topic[MAX_TOPIC_LEN]){
+    if(send(sock,topic,strnlen(topic,MAX_TOPIC_LEN),0) < 0){
+        perror("send");
+        close(sock);
+        exit(1);
+    }
+    return 0;
 }
 
 // Create UDP socket
@@ -106,8 +123,8 @@ void *heartbeat_thread(void *arg){
 
 void receive_loop(int sock, const char *sub_topic) {
     char buffer[MAX_BUFFER_SIZE + 1] = {0};
-
     while (1) {
+        puts("Receive loop");
         memset(buffer, 0, sizeof(buffer));
         ssize_t n = recv(sock, buffer, MAX_BUFFER_SIZE, 0);
         if (n <= 0) {
@@ -123,7 +140,7 @@ void receive_loop(int sock, const char *sub_topic) {
         }
 
         // Normal message
-        printf("[SUB] Received message: %.*s\n", (int)n, buffer);
+        printf("[SUB] Received message:\n%.*s\n", (int)n, buffer);
     }
 
     close(sock);
@@ -145,7 +162,8 @@ int main(int argc, char *argv[]) {
     pthread_create(&hb_thread, NULL, heartbeat_thread, &hb_sock);
  
     printf("[SUB] Connected to %s:%d, will subscribe to '%s'\n", ip, port, topic);
-
+    subscribe(sock,topic);
     receive_loop(sock, topic);
+    puts("Subscriber exit");
     return 0;
 }

@@ -59,7 +59,7 @@ int add_accept_request(int server_socket, struct sockaddr_in* client_addr, sockl
     struct io_uring_sqe* sqe = io_uring_get_sqe(&ring);
     io_uring_prep_accept(sqe, server_socket, (struct sockaddr*) client_addr, client_addr_len, 0);
     //prepare and submit accept request
-    struct request* req = malloc(sizeof(*req));
+    struct request* req = malloc(sizeof(struct request));
     req->event_type = EVENT_TYPE_ACCEPT;
     io_uring_sqe_set_data(sqe, req);
     return io_uring_submit(&ring);
@@ -67,7 +67,7 @@ int add_accept_request(int server_socket, struct sockaddr_in* client_addr, sockl
 
 int add_read_request(int client_socket) {
     struct io_uring_sqe* sqe = io_uring_get_sqe(&ring);
-    struct request* req = malloc(sizeof(*req) + sizeof(struct iovec));
+    struct request* req = malloc(sizeof(struct request) + sizeof(struct iovec));
     req->iov[0].iov_base = calloc(READ_SZ,1);
     req->iov[0].iov_len = READ_SZ;
     req->client_socket = client_socket;
@@ -198,9 +198,18 @@ int main(int argc, char* argv){
         if (cqe->res < 0) { //return value for this event
             continue;
         }
+        // struct request* write_req = malloc(sizeof(struct request) + sizeof(struct iovec));
+        // unsigned long slen = strlen("RESPONSE");
+        // write_req->iovec_count = 1;
+        // write_req->client_socket = req->client_socket;
+        // write_req->iov[0].iov_base = malloc(slen);
+        // write_req->iov[0].iov_len = slen;
+        // memcpy(write_req->iov[0].iov_base, "RESPONSE", slen);
+        // add_write_request(write_req);
+
         switch (req->event_type) {
             case EVENT_TYPE_ACCEPT:
-                // puts("accept");
+                puts("accept");
                 if(add_accept_request(server_fd, &client_addr, &client_addr_len) < 0){
                     fprintf(stderr, "add_accept_request failed: %s\n",strerror(errno));
                     exit(EXIT_FAILURE);
@@ -215,7 +224,7 @@ int main(int argc, char* argv){
                 break;
             case EVENT_TYPE_READ:
                 // io_uring_peek_cqe(&ring,&cqe);
-                printf("Request received:\n%s\n",(char*)req->iov[0].iov_base);
+                printf("Request received (socket %d):\n%s\n",req->client_socket,(char*)req->iov[0].iov_base);
                 // puts("read");
                 //if the client closed the connection, we don't want to add a new write request,
                 //since we can't use that socket/fd (it was just closed).
