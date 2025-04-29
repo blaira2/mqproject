@@ -95,6 +95,45 @@ void generate_request_data(char** headers, char** body){
     }
 }
 
+void build_headers(struct iovec* iov, char* topic){
+    char send_buffer[1024];
+
+    //0: http 200 ok
+    char* http_ok = "HTTP/1.0 200 OK\r\n";
+    unsigned long slen = strlen(http_ok);
+    iov[0].iov_base = calloc(slen,1);
+    iov[0].iov_len = slen;
+    memcpy(iov[0].iov_base, http_ok, slen);
+
+    //1: Content type
+    char* content_type = "Content-Type: text/html\r\n";
+    // sprintf(send_buffer, "Content-Type: text/html\r\n");
+    slen = strlen(content_type);
+    iov[1].iov_base = calloc(slen,1);
+    iov[1].iov_len = slen;
+    memcpy(iov[1].iov_base, content_type, slen);
+
+    //2: Content length
+    unsigned long tlen = strlen(topic);
+    sprintf(send_buffer, "Content-Length: %ld\r\n",tlen);
+    slen = strlen(send_buffer);
+    iov[2].iov_base = calloc(slen,1);
+    iov[2].iov_len = slen;
+    memcpy(iov[2].iov_base, send_buffer, slen);
+
+    //3: topic headers
+    iov[3].iov_base = calloc(tlen,1);
+    iov[3].iov_len = slen;
+    memcpy(iov[3].iov_base, topic, slen);
+
+    //4: line ending
+    char* ending = "\r\n";
+    slen = strlen(ending);
+    iov[4].iov_base = calloc(slen,1);
+    iov[4].iov_len = slen;
+    memcpy(iov[4].iov_base, ending, slen);
+}
+
 //
 void parse_response(){
     /*
@@ -244,7 +283,7 @@ int main(int argc, char* argv){
                 //if the client closed the connection, we don't want to add a new write request,
                 //since we can't use that socket/fd (it was just closed).
                 if (cqe->res == 0) {    //read returns 0 (end of file)
-                    // printf("Client disconnected. Closing socket %d\n", req->client_socket);
+                    printf("Client disconnected. Closing socket %d\n", req->client_socket);
                     close(req->client_socket);
                     free(req->iov[0].iov_base);
                     free(req);
@@ -252,25 +291,31 @@ int main(int argc, char* argv){
                 }
                 //create new (write) request to add to queue
                 //we've received the request, now we're sending the response
-                struct request* write_req = malloc(sizeof(struct request) + sizeof(struct iovec));
-                char* headers = "{old}";
-                generate_request_data(&headers,NULL);
-                unsigned long slen = strlen(headers);
-                write_req->iovec_count = 1;
+                struct request* write_req = malloc(sizeof(struct request) + sizeof(struct iovec) * 5);
+                char* topic = "{newtopicdata}\r\n";
+                write_req->iovec_count = 5;
                 write_req->client_socket = req->client_socket;
-                write_req->iov[0].iov_base = malloc(slen);
-                write_req->iov[0].iov_len = slen;
-                memcpy(write_req->iov[0].iov_base, headers, slen);
+                build_headers(write_req->iov,topic);
+                // puts("Done building headers");
+                // unsigned long slen = strlen(RESPONSE);
+
+                // write_req->iov[0].iov_base = malloc(slen);
+                // write_req->iov[0].iov_len = slen;
+                // memcpy(write_req->iov[0].iov_base, RESPONSE, slen);
                 //once we've read the request, we can add a new write request to the queue
                 if(add_write_request(write_req) < 0){
                     fprintf(stderr, "add_write_request failed: %s\n",strerror(errno));
                     exit(EXIT_FAILURE);
                 }
+                // puts("Added request");
                 free(req->iov[0].iov_base);
                 free(req);
                 break;
             case EVENT_TYPE_WRITE:
-                printf("Sending response:\n%s\n",(char*)req->iov[0].iov_base);
+                puts("Sending response:");
+                for(int i = 0; i < req->iovec_count; i++){
+                    printf("%s",(char*)req->iov[i].iov_base);
+                }
                 //add_write_request(req);
                 if(add_read_request(req->client_socket) < 0){
                     fprintf(stderr, "add_read_request failed: %s\n",strerror(errno));
