@@ -10,6 +10,7 @@
 
 #include <liburing.h>
 #include <pthread.h>
+#include <time.h>
 
 #define PORT 5555
 #define MAX_SUBS 64
@@ -26,6 +27,25 @@
 
 #define RESPONSE "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-length:15\r\n\r\nHello, world!\r\n"
 
+struct topic_tree {
+    int num_children;
+    char* topic;
+    struct topic_tree* child[];
+};
+
+/*
+Topic tree:
+{toplevel}
+    {child1}
+        {grand1}
+        {grand2}
+        {grand3}
+    {child2}
+        {grand4}
+    {child3}
+        {grand5}
+        {grand6}
+*/
 
 volatile int running = 1;
 void sigint_handler(){
@@ -88,11 +108,94 @@ int add_write_request(struct request* req) {
 }
 
 //generate (random topic) headers and body for a request
-void generate_request_data(char** headers, char** body){
-    char* new_headers = "{toplevel}";
-    if(headers != NULL){
-        *headers = new_headers;
+void generate_request_data(char** headers, char** body, struct topic_tree* topics){
+    char* new_headers = calloc(MAX_TOPIC_LEN,1);
+    int num = (rand() % 5) + 1;
+    // for(int i = 0; i < 30; i++){
+    //     num = rand() % 30;
+    //     printf("num %d: %d\n",i,num);
+    // }
+    //copy starting topic into headers
+    strcpy(new_headers,"{");
+    strcat(new_headers,topics->topic);
+    
+    if(num == 1){
+        strcat(new_headers,":child1,child2:grand4");
     }
+    if(num == 2){
+        strcat(new_headers,":child2");
+    }
+    if(num == 3){
+        strcat(new_headers,":child1:grand2");
+    }
+    if(num == 4){
+        strcat(new_headers,":child2,child3:grand5");
+    }
+    //programatically generate random topic strings
+    //may fix later since it's buggy now
+    // 4/5 chance of including children
+    // if(num < 4){
+    //     strcat(new_headers,":");
+    //     for(int i = 0; i < topics->num_children; i++){
+    //         struct topic_tree* current = topics->child[i];
+    //         for(int j = 0; j < current->num_children; j++){
+    //             num = (rand() % 5) + 1;
+    //             if(num < 6){
+
+    //             }
+    //         }
+    //         if(current && current->topic){
+    //             strcat(new_headers,current->topic);
+    //             num = (rand() % 5) + 1;
+    //         }
+
+    //     }
+    // }
+
+
+    //closing curly brace
+    strcat(new_headers,"}");
+    if(headers != NULL){
+        memcpy(*headers,new_headers,strlen(new_headers));
+    }
+}
+
+void build_headers(struct iovec* iov, char* topic){
+    char send_buffer[1024];
+
+    //0: http 200 ok
+    char* http_ok = "HTTP/1.0 200 OK\r\n";
+    unsigned long slen = strlen(http_ok);
+    iov[0].iov_base = calloc(slen,1);
+    iov[0].iov_len = slen;
+    memcpy(iov[0].iov_base, http_ok, slen);
+
+    //1: Content type
+    char* content_type = "Content-Type: text/html\r\n";
+    slen = strlen(content_type);
+    iov[1].iov_base = calloc(slen,1);
+    iov[1].iov_len = slen;
+    memcpy(iov[1].iov_base, content_type, slen);
+
+    //2: Content length
+    unsigned long tlen = strlen(topic);
+    sprintf(send_buffer, "Content-Length: %ld\r\n",tlen);
+    slen = strlen(send_buffer);
+    iov[2].iov_base = calloc(slen,1);
+    iov[2].iov_len = slen;
+    memcpy(iov[2].iov_base, send_buffer, slen);
+
+    //3: topic headers
+    iov[3].iov_base = calloc(tlen,1);
+    iov[3].iov_len = tlen;
+    memcpy(iov[3].iov_base, topic, tlen);
+
+    //4: line ending
+    char* ending = "\r\n";
+    slen = strlen(ending);
+    iov[4].iov_base = calloc(slen,1);
+    iov[4].iov_len = slen;
+    memcpy(iov[4].iov_base, ending, slen);
 }
 
 //
@@ -135,7 +238,46 @@ void parse_response(){
     */
 }
 
+int build_topic_tree(struct topic_tree** tree){
+    int num_children = 0;
+    *tree = calloc(sizeof(struct topic_tree),1);
+    (*tree)->topic = "toplevel";
+    (*tree)->num_children = 3;
+    (*tree)->child[0] = malloc(sizeof(struct topic_tree));
+    (*tree)->child[0]->topic = "child1";
+    (*tree)->child[0]->num_children = 3;
+    (*tree)->child[0]->child[0] = malloc(sizeof(struct topic_tree));
+    (*tree)->child[0]->child[1] = malloc(sizeof(struct topic_tree));
+    (*tree)->child[0]->child[2] = malloc(sizeof(struct topic_tree));
+    (*tree)->child[0]->child[0]->topic = "grand1";
+    (*tree)->child[0]->child[1]->topic = "grand2";
+    (*tree)->child[0]->child[2]->topic = "grand3";
+
+    (*tree)->child[1] = malloc(sizeof(struct topic_tree));
+    (*tree)->child[1]->topic = "child2";
+    (*tree)->child[0]->num_children = 1;
+    (*tree)->child[1]->child[0] = malloc(sizeof(struct topic_tree));
+    (*tree)->child[1]->child[0]->topic = "grand4";
+    // (*tree)->child[1]->child[0]->num_children = 0;
+
+    (*tree)->child[2] = malloc(sizeof(struct topic_tree));
+    (*tree)->child[2]->topic = "child3";
+    (*tree)->child[2]->num_children = 2;
+    (*tree)->child[2]->child[0] = malloc(sizeof(struct topic_tree));
+    (*tree)->child[2]->child[1] = malloc(sizeof(struct topic_tree));
+    (*tree)->child[2]->child[0]->topic = "grand5";
+    (*tree)->child[2]->child[1]->topic = "grand6";
+
+    num_children = 10;
+    return num_children;
+}
+
 int main(int argc, char* argv){
+    struct topic_tree* topics;
+    int num_children = 0;
+    num_children = build_topic_tree(&topics);
+    topics->num_children = num_children;
+
     int server_fd;    
     struct sockaddr_in address = {
         .sin_family = AF_INET,
@@ -197,6 +339,9 @@ int main(int argc, char* argv){
     //Array mapping subscriber fds to topics
     char subscriber_topics[MAX_SUBS + 5][MAX_TOPIC_LEN] = {0};
 
+    //for generating random topics
+    srand(time(NULL));
+
     int ret = 0;
     while(running){
         /*
@@ -244,7 +389,7 @@ int main(int argc, char* argv){
                 //if the client closed the connection, we don't want to add a new write request,
                 //since we can't use that socket/fd (it was just closed).
                 if (cqe->res == 0) {    //read returns 0 (end of file)
-                    // printf("Client disconnected. Closing socket %d\n", req->client_socket);
+                    printf("Client disconnected. Closing socket %d\n", req->client_socket);
                     close(req->client_socket);
                     free(req->iov[0].iov_base);
                     free(req);
@@ -252,25 +397,28 @@ int main(int argc, char* argv){
                 }
                 //create new (write) request to add to queue
                 //we've received the request, now we're sending the response
-                struct request* write_req = malloc(sizeof(struct request) + sizeof(struct iovec));
-                char* headers = "{old}";
-                generate_request_data(&headers,NULL);
-                unsigned long slen = strlen(headers);
-                write_req->iovec_count = 1;
+                struct request* write_req = malloc(sizeof(struct request) + sizeof(struct iovec) * 5);
+                char* headers = calloc(MAX_TOPIC_LEN,1);
+                generate_request_data(&headers,NULL,topics);
+                write_req->iovec_count = 5;
                 write_req->client_socket = req->client_socket;
-                write_req->iov[0].iov_base = malloc(slen);
-                write_req->iov[0].iov_len = slen;
-                memcpy(write_req->iov[0].iov_base, headers, slen);
+                build_headers(write_req->iov,headers);
+                // memcpy(write_req->iov[0].iov_base, RESPONSE, slen);
                 //once we've read the request, we can add a new write request to the queue
                 if(add_write_request(write_req) < 0){
                     fprintf(stderr, "add_write_request failed: %s\n",strerror(errno));
                     exit(EXIT_FAILURE);
                 }
+                // puts("Added request");
                 free(req->iov[0].iov_base);
+                free(headers);
                 free(req);
                 break;
             case EVENT_TYPE_WRITE:
-                printf("Sending response:\n%s\n",(char*)req->iov[0].iov_base);
+                puts("Sending response:");
+                for(int i = 0; i < req->iovec_count; i++){
+                    printf("%s",(char*)req->iov[i].iov_base);
+                }
                 //add_write_request(req);
                 if(add_read_request(req->client_socket) < 0){
                     fprintf(stderr, "add_read_request failed: %s\n",strerror(errno));
@@ -288,7 +436,7 @@ int main(int argc, char* argv){
 
         for(int i = 0; i < MAX_SUBS + 5; i++){
             if(strcmp(subscriber_topics[i],"") != 0){
-                // printf("subscriber_topics[%d]:\n%s\n",i,subscriber_topics[i]);
+                printf("subscriber_topics[%d]:\n%s\n",i,subscriber_topics[i]);
             }
         }
        
