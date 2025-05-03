@@ -11,60 +11,69 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <liburing.h>
 
-#define MAX_BUFFER_SIZE 1024
-#define MAX_TOPIC_LEN 128
+#define BUFFER_SIZE 1024
+#define QUEUE_DEPTH 512
+#define MAX_TOPIC_LEN 64
+#define TOPIC_CAPACITY 16
 #define DEFAULT_PORT 5555
 #define HEARTBEAT_PORT 5554
 #define HEARTBEAT_INTERVAL 3
 #define BROADCAST_IP "127.255.255.255"
 #define SYSTEM_ID 99
 
+#define TYPE_ACCEPT  0
+#define TYPE_READ  1
+
 typedef struct __attribute__((packed)) {
     uint32_t system_id;   
     uint32_t subscriber_id;
+    uint16_t topic_count; 
+    char topics[TOPIC_CAPACITY][MAX_TOPIC_LEN];
     uint64_t timestamp; // Time when the heartbeat was sent
 } heartbeat_t;
 
-//CREATE TCP socket
-int connect_to_publisher(const char *ip, int port) {
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        perror("socket");
-        exit(1);
-    }
+typedef struct request{
+    int type;
+    int client_fd;
+    int iov_count;
+    struct iovec iov[];
+} request;
 
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons(port),
-    };
-    inet_pton(AF_INET, ip, &addr.sin_addr);
+struct io_uring ring;
+static char **subscribed_topics = NULL;
+static size_t topic_count = 0;
 
-    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("connect");
-        close(sock);
-        exit(1);
-    }
 
-    // char* test = "w";
-    // if(send(sock,test,strlen(test),0) < 0){
-    //     perror("send");
-    //     close(sock);
-    //     exit(1);
-    // }
-
-    return sock;
-}
-
-//send initial subscription message to publisher
-int subscribe(int sock, const char topic[MAX_TOPIC_LEN]){
-    if(send(sock,topic,strnlen(topic,MAX_TOPIC_LEN),0) < 0){
-        perror("send");
-        close(sock);
-        exit(1);
+// check whether already subscribed
+static int is_subscribed(const char *topic) {
+    for (size_t i = 0; i < topic_count; ++i) {
+        if (strcmp(subscribed_topics[i], topic) == 0)
+            return 1;
     }
     return 0;
 }
+
+int subscribe_to_topic(const char *topic){
+    if (!topic){
+        return -1;
+    } 
+    if (is_subscribed(topic)){
+        return 0;
+    }
+
+    if (topic_count >= TOPIC_CAPACITY) {
+        printf("[SUB] Topics at capacity\n");
+    }
+    else{
+        printf("[SUB] Added subscription for %s\n", topic);
+        subscribed_topics[topic_count++] = strdup(topic);
+    }
+
+    return 0;
+}
+
 
 // Create UDP socket
 int setup_heartbeat(){
@@ -105,8 +114,13 @@ void *heartbeat_thread(void *arg){
         heartbeat_t hb;
         hb.system_id = htonl(SYSTEM_ID);
         hb.subscriber_id = htonl(3); 
-        hb.timestamp = htobe64(time(NULL)); 
-
+        hb.timestamp = htobe64(time(NULL));
+        hb.topic_count = htons((uint16_t)topic_count);
+        // copy each topic string in
+        for (size_t i = 0; i < topic_count; ++i) {
+            strncpy(hb.topics[i], subscribed_topics[i], MAX_TOPIC_LEN-1);
+            hb.topics[i][MAX_TOPIC_LEN-1] = '\0';
+        }
 
         int beat = sendto(hb_sock, &hb, sizeof(hb), 0, (struct sockaddr *)&broadcast_addr, sizeof(broadcast_addr));
         if (beat < 0) {
@@ -120,30 +134,79 @@ void *heartbeat_thread(void *arg){
 
 }
 
+int add_accept_request(int server_socket, struct sockaddr_in *client_addr, socklen_t *client_addr_len) {
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    io_uring_prep_accept(sqe, server_socket, (struct sockaddr *) client_addr, client_addr_len, 0);
+    struct request *req = malloc(sizeof(*req));
+    req->type = TYPE_ACCEPT;
+    io_uring_sqe_set_data(sqe, req);
+    io_uring_submit(&ring);
+    return 0;
+}
+
+int add_read_request(int client_socket) {
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    struct request *req = malloc(sizeof(*req) + sizeof(struct iovec));
+    req->iov[0].iov_base = malloc(BUFFER_SIZE);
+    req->iov[0].iov_len = BUFFER_SIZE;
+    req->type = TYPE_READ;
+    req->client_fd = client_socket;
+    memset(req->iov[0].iov_base, 0, BUFFER_SIZE);
+    io_uring_prep_readv(sqe, client_socket, &req->iov[0], 1, 0);
+    io_uring_sqe_set_data(sqe, req);
+    io_uring_submit(&ring);
+    return 0;
+}
+
+int setup_listen_socket(int port) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    int yes = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
+    struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+        .sin_port = htons(port)
+    };
+    bind(sock, (struct sockaddr*)&addr, sizeof(addr));
+    listen(sock, SOMAXCONN);
+    return sock;
+}
+
 
 void receive_loop(int sock, const char *sub_topic) {
-    char buffer[MAX_BUFFER_SIZE + 1] = {0};
+    
+    char buffer[BUFFER_SIZE + 1] = {0};
+    struct sockaddr_in address;
+    int addrlen = sizeof(address);
+    //prime io_uring for first accept
+    add_accept_request(sock, &address, &addrlen);
+
     while (1) {
-        puts("Receive loop");
-        memset(buffer, 0, sizeof(buffer));
-        ssize_t n = recv(sock, buffer, MAX_BUFFER_SIZE, 0);
-        if (n <= 0) {
-            perror("recv");
-            break;
-        }
+        struct io_uring_cqe *cqe;
+        io_uring_wait_cqe(&ring, &cqe);
+        struct request *req = (struct request *) cqe->user_data;
 
-        // Check if this is a topic request .
-        if (strncmp(buffer, "REQ_TOPIC", 9) == 0) {
-            printf("[SUB] Received REQ_TOPIC, sending subscription '%s'\n", sub_topic);
-            send(sock, sub_topic, strlen(sub_topic), 0);
-            continue;
+        switch (req->type) {
+            case TYPE_ACCEPT:
+                printf("Accepted client FD: %d\n", cqe->res);
+                add_accept_request(sock, &address, &addrlen);
+            	add_read_request(cqe->res);
+		        break;
+            case TYPE_READ:
+		        printf("Read from FD: %d\n", req->client_fd);
+                if (cqe->res > 0) {
+                    add_read_request(req->client_fd);
+                    //handle_client_request(req);
+                } else {
+                    close(req->client_fd);
+                }
+                break;
         }
-
+        free(req);
         // Normal message
-        printf("[SUB] Received message:\n%.*s\n", (int)n, buffer);
+        printf("[SUB] Received message:\n%.*s\n", (int)0, buffer);
     }
-
-    close(sock);
 }
 
 int main(int argc, char *argv[]) {
@@ -152,18 +215,26 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    //initalize topic array
+    subscribed_topics = malloc(TOPIC_CAPACITY * MAX_TOPIC_LEN);
+
+    //initialize uring
+    if(io_uring_queue_init(QUEUE_DEPTH, &ring, 0) < 0){
+        perror("io_uring failed");
+        exit(EXIT_FAILURE);
+    }
+    // set up TCP listen socket
+    int listen_fd = setup_listen_socket(DEFAULT_PORT);
+
     const char *ip = argv[1];
     int port = atoi(argv[2]);
     const char *topic = argv[3];
 
-    int sock = connect_to_publisher(ip, port);    
     int hb_sock = setup_heartbeat();
     pthread_t hb_thread;
     pthread_create(&hb_thread, NULL, heartbeat_thread, &hb_sock);
  
-    printf("[SUB] Connected to %s:%d, will subscribe to '%s'\n", ip, port, topic);
-    subscribe(sock,topic);
-    receive_loop(sock, topic);
+    receive_loop(listen_fd, topic);
     puts("Subscriber exit");
     return 0;
 }

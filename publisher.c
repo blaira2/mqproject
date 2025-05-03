@@ -10,7 +10,7 @@
 #include <fcntl.h>
 
 #define MAX_SUBS 64
-#define MAX_TOPIC_LEN 128
+#define MAX_TOPIC_LEN 64
 #define MAX_BUFFER_SIZE 1024
 #define DEFAULT_PORT 5555
 #define HEARTBEAT_PORT 5554
