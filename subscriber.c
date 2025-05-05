@@ -194,8 +194,13 @@ void receive_loop(int sock, const char *sub_topic) {
             	add_read_request(cqe->res);
 		        break;
             case TYPE_READ:
-		        printf("Read from FD: %d\n", req->client_fd);
-                if (cqe->res > 0) {
+                int result = cqe->res;
+		        
+                if (result > 0) {
+                    char *msg = req->iov[0].iov_base;
+                    msg[result] = '\0';
+                    printf("Read from FD: %d: %s\n", req->client_fd, msg);
+                    free(msg);
                     add_read_request(req->client_fd);
                     //handle_client_request(req);
                 } else {
@@ -203,8 +208,10 @@ void receive_loop(int sock, const char *sub_topic) {
                 }
                 break;
         }
+        io_uring_cqe_seen(&ring, cqe);
+
         free(req);
-        // Normal message
+
         printf("[SUB] Received message:\n%.*s\n", (int)0, buffer);
     }
 }
