@@ -15,16 +15,16 @@ MS_SRC=$(MS).c
 
 all: $(SUB) $(PUB) $(URING) $(MS)
 
-subscriber: $(SUB_SRC)
+$(SUB): $(SUB_SRC)
 	$(CC) $(CFLAGS) $(SUB_SRC) -o $(SUB) $(LDFLAGS)
 
-publisher: $(PUB_SRC)
+$(PUB): $(PUB_SRC)
 	$(CC) $(CFLAGS) $(PUB_SRC) -o $(PUB)
 
-publisher_uring: $(URING_SRC)
+$(URING): $(URING_SRC)
 	$(CC) $(CFLAGS) $(URING_SRC) -o $(URING) $(LDFLAGS)
 
-microservice: $(MS_SRC)
+$(MS): $(MS_SRC)
 	$(CC) $(CFLAGS) $(MS_SRC) -o $(MS) $(LDFLAGS)
 
 .PHONY: clean

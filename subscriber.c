@@ -204,6 +204,11 @@ void receive_loop(int sock, const char *sub_topic) {
 
         struct io_uring_cqe *cqe;
         io_uring_wait_cqe(&ring, &cqe);
+        if(!cqe) {
+            printf("Completion queue is empty, skipping...\n");
+            continue;
+            // exit(EXIT_FAILURE);
+        }
         struct request *req = (struct request *) cqe->user_data;
 
         switch (req->type) {
