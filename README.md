@@ -42,8 +42,8 @@ In the publisher terminal, use the format:
 - Support for multiple subscribers
 - Topic-based message filtering
 - subscribers UDP heartbeat for discovery
-x Support for multiple publishers
-x subscribers to discover new publishers
-x publishers clean up missing subscribers 
-x subscriber queues
+- Support for multiple publishers
+- subscribers to discover new publishers
+- publishers clean up missing subscribers 
+- subscriber queues
 

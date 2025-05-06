@@ -16,6 +16,7 @@
 #define MAX_BUFFER_SIZE 1024
 #define DEFAULT_PORT 5555
 #define HEARTBEAT_PORT 5554
+#define SUBSCRIBER_TIMEOUT 10 
 
 typedef struct __attribute__((packed)) {
     uint32_t system_id;
@@ -42,6 +43,8 @@ typedef struct {
 } subs_t;
 
 int new_stdin;
+
+static subscriber_t subs[MAX_SUBS];
 
 int connect_to_subscriber(uint32_t ip_addr, uint16_t port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -110,6 +113,7 @@ void debug_subscription_matching(subscriber_t *subs, const char *topic, const ch
         }
     }
 }
+
 
 void handle_messaging(subscriber_t *subs) {
     char input[MAX_BUFFER_SIZE] = {0};
@@ -225,8 +229,9 @@ void *subscription_listener_thread(void *arg) {
             if (sock >= 0) {
                 subs[slot].tcp_sock = sock;
                 subs[slot].subscriber_id = sub_id;
-                printf("[PUB] Connected to subscriber %s on %d topics\n",
+                printf("[PUB] Connected to subscriber %s:%u on %d topics\n",
                        inet_ntoa(*(struct in_addr *)&sender_ip),
+                       subs[slot].port,
                        count);
             } else {
                 printf("[PUB] Failed to connect to %s\n",
@@ -237,6 +242,35 @@ void *subscription_listener_thread(void *arg) {
 
     printf("[PUB] Exiting heartbeat listener thread.\n");
 
+    return NULL;
+}
+
+void *subscriber_cleanup_thread(void *arg) {
+
+    while (1) {
+        sleep(1);
+        time_t now = time(NULL);
+
+        for (int i = 0; i < MAX_SUBS; i++) {
+            subscriber_t *sub = &subs[i];
+
+            if (sub->tcp_sock >= 0 && (now - sub->last_heartbeat) > SUBSCRIBER_TIMEOUT) {
+                struct in_addr in = { .s_addr = sub->ip_addr };
+                printf("[PUB] Unsubscribing %s:%u due to inactivity\n",
+                       inet_ntoa(in),
+                       sub->port);
+
+                close(sub->tcp_sock);
+                sub->tcp_sock        = -1;
+                sub->ip_addr         = 0;
+                sub->port            = 0;
+                sub->subscriber_id   = 0;
+                sub->topic_count     = 0;
+                sub->topic_received  = 0;
+                sub->last_heartbeat  = 0;
+            }
+        }
+    }
     return NULL;
 }
 
@@ -289,7 +323,6 @@ int main() {
     printf("[PUB] Listening for heartbeats on %d...\n", HEARTBEAT_PORT);
 
     // Initialize subscribers list
-    subscriber_t subs[MAX_SUBS];
     memset(subs, 0, sizeof(subs));  
     for (int i = 0; i < MAX_SUBS; i++) {
         subs[i].tcp_sock = -1;
@@ -321,9 +354,15 @@ int main() {
 
     pthread_t listener_thread;
     if (pthread_create(&listener_thread, NULL, subscription_listener_thread, subset) != 0) {
-        perror("pthread_create");
+        perror("pthread_create hb listener");
         free(subset);
         return 1;
+    }
+
+    pthread_t cleanup_thread;
+    if (pthread_create(&cleanup_thread, NULL, subscriber_cleanup_thread, NULL) != 0) {
+        perror("pthread_create cleanup");
+        exit(1);
     }
 
     pthread_detach(listener_thread); 
