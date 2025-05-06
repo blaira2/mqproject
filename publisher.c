@@ -8,6 +8,7 @@
 #include <sys/select.h>
 #include <pthread.h>
 #include <fcntl.h>
+#include <poll.h>
 
 #define MAX_SUBS 128
 #define MAX_TOPIC_LEN 64
@@ -40,7 +41,7 @@ typedef struct {
     subscriber_t *subs;
 } subs_t;
 
-
+int new_stdin;
 
 int connect_to_subscriber(uint32_t ip_addr, uint16_t port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -116,6 +117,9 @@ void handle_messaging(subscriber_t *subs) {
     if (!fgets(input, sizeof(input), stdin)) {
         return;
     }
+    // if(read(fd_from_microservice_request_or_stdin,input,sizeof(input)) < 0){
+    //     return;
+    // }
 
     char *topic = strtok(input, " ");
     char *msg = strtok(NULL, "\n");
@@ -140,6 +144,14 @@ void handle_messaging(subscriber_t *subs) {
                 }
             }
         }
+    }
+}
+
+void* microservice_listener_thread(void* arg){
+    printf("microservice listener started\n");
+
+    while(1){
+
     }
 }
 
@@ -291,6 +303,21 @@ int main() {
     }
     subset->socket = hb_sock;
     subset->subs = subs;
+
+    new_stdin = dup(STDIN_FILENO);
+    struct pollfd fds[2];
+    fds[0].fd = STDIN_FILENO;
+    fds[0].events = POLLIN | POLLOUT;
+    fds[1].fd = STDIN_FILENO;
+    fds[1].events = POLLIN | POLLOUT;
+    poll(fds,2,-1);
+
+    pthread_t microservice_thread;
+    if (pthread_create(&microservice_thread, NULL, microservice_listener_thread, NULL) != 0) {
+        perror("pthread_create");
+        free(subset);
+        return 1;
+    }
 
     pthread_t listener_thread;
     if (pthread_create(&listener_thread, NULL, subscription_listener_thread, subset) != 0) {
