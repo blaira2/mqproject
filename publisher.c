@@ -62,6 +62,51 @@ int connect_to_subscriber(uint32_t ip_addr) {
     return sock;
 }
 
+//Debug only
+void debug_subscription_matching(subscriber_t *subs, const char *topic, const char *msg) {
+    printf("=== Debug: publishing message on topic '%s': \"%s\" ===\n",
+           topic, msg);
+
+    for (int i = 0; i < MAX_SUBS; i++) {
+        subscriber_t *sub = &subs[i];
+        if (sub->tcp_sock < 0) continue;  // skip unused slots
+
+        // Convert IP to dotted-quad
+        struct in_addr in;
+        in.s_addr = sub->ip_addr;
+        const char *ip_str = inet_ntoa(in);
+
+        printf("Subscriber[%2d]: fd=%d, ip=%s, topic_received=%s, topic_count=%d\n",
+               i,
+               sub->tcp_sock,
+               ip_str,
+               sub->topic_received ? "true" : "false",
+               sub->topic_count);
+
+        // List its subscribed topics
+        printf("    Topics:");
+        for (int t = 0; t < sub->topic_count; t++) {
+            printf(" '%s'", sub->topics[t]);
+        }
+        printf("\n");
+
+        // Check for match
+        if (sub->topic_received && sub->topic_count > 0) {
+            int match = 0;
+            for (int t = 0; t < sub->topic_count; t++) {
+                if (strcmp(topic, sub->topics[t]) == 0) {
+                    match = 1;
+                    break;
+                }
+            }
+            printf("    -> %s\n\n",
+                   match ? "MATCH: will send" : "NO MATCH: skipping");
+        } else {
+            printf("    -> SKIPPING: no topics registered yet\n\n");
+        }
+    }
+}
+
 void handle_messaging(subscriber_t *subs) {
     char input[MAX_BUFFER_SIZE] = {0};
 
@@ -72,14 +117,16 @@ void handle_messaging(subscriber_t *subs) {
     char *topic = strtok(input, " ");
     char *msg = strtok(NULL, "\n");
 
-
     if (!topic || !msg) {
         printf("Usage: <topic> <message>\n");
         return;
     }
     if( strlen(topic) > MAX_TOPIC_LEN){
         printf("Invalid topic\n");
+        return;
     }
+
+    debug_subscription_matching(subs, topic, msg); //print out a bunch of stuff
 
     // check all subs/topics
     for (int i = 0; i < MAX_SUBS; i++) {
@@ -94,7 +141,8 @@ void handle_messaging(subscriber_t *subs) {
 }
 
 
-//broadcast listen (UDP)
+// Broadcast listen (UDP) for heartbeats.
+// Using heartbeats to determine each subscribers topics
 void *subscription_listener_thread(void *arg) {
     subs_t *subset = (subs_t *)arg;
     int hb_sock = subset->socket;
