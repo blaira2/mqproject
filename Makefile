@@ -14,7 +14,7 @@ URING_SRC=$(URING).c
 all: $(SUB) $(PUB) $(URING)
 
 subscriber: $(SUB_SRC)
-	$(CC) $(CFLAGS) $(SUB_SRC) -o $(SUB)
+	$(CC) $(CFLAGS) $(SUB_SRC) -o $(SUB) $(LDFLAGS)
 
 publisher: $(PUB_SRC)
 	$(CC) $(CFLAGS) $(PUB_SRC) -o $(PUB)
