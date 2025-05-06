@@ -17,8 +17,8 @@
 #define HEARTBEAT_PORT 5554
 
 typedef struct __attribute__((packed)) {
-    uint32_t system_id;   
-    uint32_t subscriber_id;
+    uint32_t system_id;
+    uint16_t advertised_port;
     uint16_t topic_count; 
     char topics[TOPIC_CAPACITY][MAX_TOPIC_LEN];
     uint64_t timestamp; // Time when the heartbeat was sent
@@ -26,7 +26,9 @@ typedef struct __attribute__((packed)) {
 
 typedef struct {
     int tcp_sock;  // TCP socket file descriptor
-    uint32_t ip_addr; 
+    uint32_t ip_addr;
+    uint16_t port;
+    uint32_t subscriber_id; 
     char topics[TOPIC_CAPACITY][MAX_TOPIC_LEN];
     int topic_count;
     int topic_received;
@@ -40,7 +42,7 @@ typedef struct {
 
 
 
-int connect_to_subscriber(uint32_t ip_addr) {
+int connect_to_subscriber(uint32_t ip_addr, uint16_t port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         perror("socket");
@@ -50,7 +52,7 @@ int connect_to_subscriber(uint32_t ip_addr) {
     struct sockaddr_in sub_addr;
     memset(&sub_addr, 0, sizeof(sub_addr));
     sub_addr.sin_family = AF_INET;
-    sub_addr.sin_port = htons(DEFAULT_PORT);
+    sub_addr.sin_port = htons(port);
     sub_addr.sin_addr.s_addr = ip_addr;
 
     if (connect(sock, (struct sockaddr *)&sub_addr, sizeof(sub_addr)) < 0) {
@@ -76,10 +78,11 @@ void debug_subscription_matching(subscriber_t *subs, const char *topic, const ch
         in.s_addr = sub->ip_addr;
         const char *ip_str = inet_ntoa(in);
 
-        printf("Subscriber[%2d]: fd=%d, ip=%s, topic_received=%s, topic_count=%d\n",
+        printf("Subscriber[%2d]: fd=%d, ip=%s, id=%d, topic_received=%s, topic_count=%d\n",
                i,
                sub->tcp_sock,
                ip_str,
+               sub->subscriber_id,
                sub->topic_received ? "true" : "false",
                sub->topic_count);
 
@@ -171,12 +174,14 @@ void *subscription_listener_thread(void *arg) {
         //extract heartbeat
         heartbeat_t *hb = (heartbeat_t*)hb_buffer;
         uint32_t sender_ip = src_addr.sin_addr.s_addr;
+        uint16_t sender_port = ntohs(hb->advertised_port);
+        uint32_t sub_id = ntohl(hb->system_id);  
         uint16_t count = ntohs(hb->topic_count);
 
         //check in subscriber array
         int slot = -1;
         for (int i = 0; i < MAX_SUBS; i++) {
-            if (subs[i].ip_addr == sender_ip) {
+            if (subs[i].ip_addr == sender_ip && subs[i].subscriber_id == sub_id) {
                 slot = i; //already exists
                 break;
             }
@@ -188,10 +193,11 @@ void *subscription_listener_thread(void *arg) {
             continue; //if no free slots ignore
         }
         // Update heartbeat timestamp
-        subs[slot].ip_addr         = sender_ip;
-        subs[slot].last_heartbeat  = time(NULL);
+        subs[slot].ip_addr = sender_ip;
+        subs[slot].port = sender_port;
+        subs[slot].last_heartbeat = time(NULL);
 
-         // fill in new subscriber struct details
+         // fill in new subscriber struct topic details
         for (int t = 0; t < count; t++) {
             strncpy(subs[slot].topics[t],
                     hb->topics[t],
@@ -203,9 +209,10 @@ void *subscription_listener_thread(void *arg) {
 
         // If this is a new subscriber, connect (TCP)
         if (subs[slot].tcp_sock < 0) {
-            int sock = connect_to_subscriber(sender_ip);
+            int sock = connect_to_subscriber(sender_ip, sender_port);
             if (sock >= 0) {
                 subs[slot].tcp_sock = sock;
+                subs[slot].subscriber_id = sub_id;
                 printf("[PUB] Connected to subscriber %s on %d topics\n",
                        inet_ntoa(*(struct in_addr *)&sender_ip),
                        count);
@@ -271,6 +278,7 @@ int main() {
 
     // Initialize subscribers list
     subscriber_t subs[MAX_SUBS];
+    memset(subs, 0, sizeof(subs));  
     for (int i = 0; i < MAX_SUBS; i++) {
         subs[i].tcp_sock = -1;
     }

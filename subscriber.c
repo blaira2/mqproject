@@ -1,5 +1,5 @@
 // subscriber.c
-// subscribe to all publishers, boradcast topic on request
+// subscribe to all publishers, broadcast topic on request
 // receives with io_uring
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,9 +27,9 @@
 #define TYPE_READ  1
 
 typedef struct __attribute__((packed)) {
-    uint32_t system_id;   
-    uint32_t subscriber_id;
-    uint16_t topic_count; 
+    uint32_t system_id;
+    uint16_t advertised_port;
+    uint16_t topic_count;
     char topics[TOPIC_CAPACITY][MAX_TOPIC_LEN];
     uint64_t timestamp; // Time when the heartbeat was sent
 } heartbeat_t;
@@ -43,7 +43,9 @@ typedef struct request{
 
 struct io_uring ring;
 static char **subscribed_topics = NULL;
-static size_t topic_count = 0;
+static uint16_t topic_count = 0;
+static uint32_t subscriber_id; //to be put in every heartbeat system_id
+static uint16_t listen_port; //find available port
 
 
 // check whether already subscribed
@@ -72,6 +74,12 @@ int subscribe_to_topic(const char *topic){
     }
 
     return 0;
+}
+
+uint32_t generate_id() {
+    uint32_t pid_part = (uint32_t)getpid();
+    uint32_t time_part = (uint32_t)time(NULL);
+    return (pid_part * 31) ^ (time_part);
 }
 
 
@@ -112,10 +120,10 @@ void *heartbeat_thread(void *arg){
     
     while (1) {
         heartbeat_t hb;
-        hb.system_id = htonl(SYSTEM_ID);
-        hb.subscriber_id = htonl(3); 
+        hb.system_id = htonl(subscriber_id);
         hb.timestamp = htobe64(time(NULL));
-        hb.topic_count = htons((uint16_t)topic_count);
+        hb.advertised_port = htons(listen_port);
+        hb.topic_count = htons(topic_count);
         // copy each topic string in
         for (size_t i = 0; i < topic_count; ++i) {
             strncpy(hb.topics[i], subscribed_topics[i], MAX_TOPIC_LEN-1);
@@ -158,7 +166,7 @@ int add_read_request(int client_socket) {
     return 0;
 }
 
-int setup_listen_socket(int port) {
+int setup_listen_socket(uint16_t *out_port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     int yes = 1;
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
@@ -166,10 +174,20 @@ int setup_listen_socket(int port) {
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_addr.s_addr = htonl(INADDR_ANY),
-        .sin_port = htons(port)
+        .sin_port = htons(0) //ask for a free port
     };
     bind(sock, (struct sockaddr*)&addr, sizeof(addr));
+
+    socklen_t len = sizeof(addr);
+    if (getsockname(sock, (struct sockaddr*)&addr, &len) < 0) {
+        perror("[SUB] getsockname fail");
+        close(sock);
+        return -1;
+    }
+    *out_port = ntohs(addr.sin_port);
+
     listen(sock, SOMAXCONN);
+    printf("[SUB] Listening on port %u\n", *out_port);
     return sock;
 }
 
@@ -217,14 +235,16 @@ void receive_loop(int sock, const char *sub_topic) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 4) {
-        fprintf(stderr, "Usage: %s <publisher_ip> <port> <topic>\n", argv[0]);
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s <publisher_ip> <topic>\n", argv[0]);
         return 1;
     }
+    //generate unique system id
+    subscriber_id = generate_id();
 
     //initalize topic array
     subscribed_topics = malloc(TOPIC_CAPACITY * MAX_TOPIC_LEN);
-    subscribe_to_topic(argv[3]);
+    subscribe_to_topic(argv[2]);
 
     //initialize uring
     if(io_uring_queue_init(QUEUE_DEPTH, &ring, 0) < 0){
@@ -232,11 +252,11 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
     // set up TCP listen socket
-    int listen_fd = setup_listen_socket(DEFAULT_PORT);
+    int listen_fd = setup_listen_socket(&listen_port);
 
     const char *ip = argv[1];
-    int port = atoi(argv[2]);
-    const char *topic = argv[3];
+    //int port = atoi(argv[2]);
+    const char *topic = argv[2];
 
     int hb_sock = setup_heartbeat();
     pthread_t hb_thread;
