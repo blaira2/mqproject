@@ -14,7 +14,7 @@
 #define MAX_TOPIC_LEN 64
 #define MAX_BUFFER_SIZE 1024
 #define DEFAULT_ADDR "127.0.0.1"
-#define ZMQ_ADDR "tcp://*:5556"
+#define ZMQ_ADDR "tcp://127.0.0.1:5556"
 
 int main(int argc, char* argv[]){
     char* usage = "Usage: %s <\"reg\"|\"zmq\">\n";
@@ -158,32 +158,11 @@ int main(int argc, char* argv[]){
                 // goto EXIT;
                 // continue;
             }
+            //some buffering(?) causes requests to not be individual. This fixes(?) that
             usleep(300);
         }
         sleep(1);
     }
-
-    // while(1){
-    //     memset(to_send, 0, sizeof(to_send));
-    //     // printf("Microservice command> ");
-    //     if(!fgets(to_send, sizeof(to_send), stdin)){
-    //         fprintf(stderr, "Error: fgets failed. %s.\n", strerror(errno));
-    //         goto EXIT;
-    //     }
-    //     printf("Microservice to send: %s\n",to_send);
-    //     if(send(conn_fd,to_send,strlen(to_send),0) < 0){
-    //         fprintf(stderr, "Error: Failed to send data. %s.\n", strerror(errno));
-    //         goto EXIT;
-    //     }
-    //     // puts("End of loop");
-    // }
-
-
-    // char buff[1024];
-    // int n;
-    // while(1){
-    //     read(conn_fd)
-    // }
 
 EXIT:
     free(topic);
