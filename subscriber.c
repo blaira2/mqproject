@@ -250,7 +250,7 @@ int main(int argc, char *argv[]) {
 
     //initalize topic array
     subscribed_topics = malloc(TOPIC_CAPACITY * MAX_TOPIC_LEN);
-    subscribe_to_topic(argv[2]);
+    subscribe_to_topic(argv[1]);
 
     //initialize uring
     if(io_uring_queue_init(QUEUE_DEPTH, &ring, 0) < 0){
