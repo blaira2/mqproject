@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
         if (n < 0) break;
         msg[n] = '\0';
 
-        printf("[%s] %s\n", topic, msg);
+        // printf("[%s] %s\n", topic, msg);
         fflush(stdout);
     }
 

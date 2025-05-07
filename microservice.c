@@ -8,6 +8,7 @@
 #include <time.h>
 #include <signal.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 
 #define DEFAULT_PORT 4444
 #define ZMQ_PORT 5556
@@ -16,12 +17,19 @@
 #define DEFAULT_ADDR "127.0.0.1"
 #define ZMQ_ADDR "tcp://127.0.0.1:5556"
 
+double getdetlatimeofday(struct timeval *begin, struct timeval *end) {
+    return (end->tv_sec + end->tv_usec * 1.0 / 1000000) -
+           (begin->tv_sec + begin->tv_usec * 1.0 / 1000000);
+}
+
 int main(int argc, char* argv[]){
     char* usage = "Usage: %s <\"reg\"|\"zmq\">\n";
     if(argc != 2){
         printf(usage,argv[0]);
         return 1;
     }
+
+    struct timeval begin, end;
 
     char* pub_prog, *endpoint;
     int port = DEFAULT_PORT;
@@ -144,6 +152,7 @@ int main(int argc, char* argv[]){
     // strncpy(message, topic, MAX_TOPIC_LEN);
     while(1){
         // int iterations = (rand() % 500) + 10;
+        gettimeofday(&begin, NULL);
         for(int i = 0; i < 10000; i++){
             memset(message, 0, MAX_BUFFER_SIZE + MAX_TOPIC_LEN);
             num = rand() % topic_count;
@@ -159,8 +168,11 @@ int main(int argc, char* argv[]){
                 // continue;
             }
             //some buffering(?) causes requests to not be individual. This fixes(?) that
-            usleep(300);
+            // usleep(300);
         }
+        gettimeofday(&end, NULL);
+        double delta = getdetlatimeofday(&begin, &end);
+        printf("Finished sending 10000 requests in %.10f seconds\n",delta);
         sleep(1);
     }
 

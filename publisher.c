@@ -89,8 +89,7 @@ static int topic_matches(const char *published, const char *sub) {
 
 //Debug only
 void debug_subscription_matching(subscriber_t *subs, const char *topic, const char *msg) {
-    printf("=== Debug: publishing message on topic '%s': \"%s\" ===\n",
-           topic, msg);
+    printf("=== Debug: publishing message on topic '%s': \"%s\" ===\n",topic, msg);
 
     for (int i = 0; i < MAX_SUBS; i++) {
         subscriber_t *sub = &subs[i];
@@ -169,7 +168,7 @@ void handle_messaging(subscriber_t *subs) {
             for (int t = 0; t < subs[i].topic_count; t++) {
                 if (topic_matches(topic, subs[i].topics[t])) {
                     // strcat(msg, "\0");
-                    debug_subscription_matching(subs, topic, msg); //print out a bunch of stuff
+                    // debug_subscription_matching(subs, topic, msg); //print out a bunch of stuff
                     // usleep(100);
                     send(subs[i].tcp_sock, msg, strlen(msg), 0);
                     // send(subs[i].tcp_sock, "\0", strlen("\0"), 0);

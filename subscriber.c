@@ -223,7 +223,7 @@ void receive_loop(int sock, const char *sub_topic) {
                 if (result > 0) {
                     char *msg = req->iov[0].iov_base;
                     msg[result] = '\0';
-                    printf("Read from FD: %d: %s\n", req->client_fd, msg);
+                    // printf("Read from FD: %d: %s\n", req->client_fd, msg);
                     free(msg);
                     add_read_request(req->client_fd);
                     //handle_client_request(req);
@@ -236,7 +236,7 @@ void receive_loop(int sock, const char *sub_topic) {
 
         free(req);
 
-        printf("[SUB] Received message:\n%.*s\n", (int)0, buffer);
+        // printf("[SUB] Received message:\n%.*s\n", (int)0, buffer);
     }
 }
 
