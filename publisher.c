@@ -74,6 +74,18 @@ int connect_to_subscriber(uint32_t ip_addr, uint16_t port) {
 
     return sock;
 }
+// match sub-topics separated by colon
+static int topic_matches(const char *published, const char *sub) {
+    size_t len = strlen(sub);
+    if (strcmp(published, sub) == 0) {
+        return 1;
+    }
+
+    if (strncmp(published, sub, len) == 0 && published[len] == ':') {
+        return 1;
+    }
+    return 0;
+}
 
 //Debug only
 void debug_subscription_matching(subscriber_t *subs, const char *topic, const char *msg) {
@@ -108,7 +120,7 @@ void debug_subscription_matching(subscriber_t *subs, const char *topic, const ch
         if (sub->topic_received && sub->topic_count > 0) {
             int match = 0;
             for (int t = 0; t < sub->topic_count; t++) {
-                if (strcmp(topic, sub->topics[t]) == 0) {
+                if (topic_matches(topic, sub->topics[t])) {
                     match = 1;
                     break;
                 }
@@ -157,8 +169,9 @@ void handle_messaging(subscriber_t *subs) {
     for (int i = 0; i < MAX_SUBS; i++) {
         if (subs[i].tcp_sock >= 0 && subs[i].topic_received) {
             for (int t = 0; t < subs[i].topic_count; t++) {
-                if (strcmp(topic, subs[i].topics[t]) == 0) {
+                if (topic_matches(topic, subs[i].topics[t])) {
                     send(subs[i].tcp_sock, msg, strlen(msg), 0);
+                    break;  // no need to check other subscripts
                 }
             }
         }
