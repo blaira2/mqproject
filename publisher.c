@@ -53,6 +53,10 @@ int new_stdin;
 
 static subscriber_t subs[MAX_SUBS];
 
+char* microservice_command;
+int microservice_fd = -1;
+int pipe_fds[2];    //used to write data from microservice thread to sending thread
+
 int connect_to_subscriber(uint32_t ip_addr, uint16_t port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
@@ -137,25 +141,18 @@ void debug_subscription_matching(subscriber_t *subs, const char *topic, const ch
 void handle_messaging(subscriber_t *subs) {
     char input[MAX_BUFFER_SIZE] = {0};
 
-    // if (!fgets(input, sizeof(input), stdin)) {
+    // printf("Microservice fd handle messaging: %d\n",microservice_fd);
+    if(read(pipe_fds[0],input,sizeof(input)) < 0){
+        fprintf(stderr, "Could not read from ms fd: %s\n",strerror(errno));
         // return;
-    // }
-    /*
-    Start microservice listening in beginning and wait for microservice to connect
-    Save that fd
-    pass it to handle_messaging
-    poll() in here to listen to both
-    */
-    //poll() here
-    // if(read(fd_from_microservice_request_or_stdin,input,sizeof(input)) < 0){
-    //     return;
-    // }
+    }
 
     char *topic = strtok(input, " ");
     char *msg = strtok(NULL, "\n");
 
+
     if (!topic || !msg) {
-        // printf("Usage: <topic> <message>\n");
+        printf("Usage: <topic> <message>\n");
         return;
     }
     if( strlen(topic) > MAX_TOPIC_LEN){
@@ -192,9 +189,6 @@ void* microservice_listener_thread(void* arg){
     ms_addr.sin_addr.s_addr = INADDR_ANY;
     int addrlen = sizeof(ms_addr);
 
-    // int new_sock = accept(sockfd-1, (struct sockaddr*) &ms_addr, &addrlen);
-    // printf("Sock: %d. new_sock: %d\n",sockfd,new_sock);
-    // sleep(1);
     int conn = connect(sockfd, (struct sockaddr*) &ms_addr, sizeof(ms_addr));
     char inbuf[1024];
     if(conn < 0){
@@ -202,13 +196,25 @@ void* microservice_listener_thread(void* arg){
     }
     else {
         *(int*)arg = sockfd;
+        microservice_fd = sockfd;
+        if(pipe(pipe_fds) < 0){
+            fprintf(stderr,"Pipe failed: %s\n",strerror(errno));
+            exit(1);
+        }
         while(1){
-            int recvbytes = recv(sockfd, inbuf, sizeof(inbuf), 0);
+            // printf("sockfd ms: %d\n",sockfd);
+            int recvbytes = recv(sockfd, microservice_command, sizeof(inbuf), 0);
             if(recvbytes < 0){
                 fprintf(stderr, "Thread failed to receive: %s\n",strerror(errno));
             }
-            printf("Recv data: %s\n",inbuf);
-            memset(inbuf, 0, sizeof(inbuf));
+            // printf("Recv data: %s\n",microservice_command);
+            if(strcmp("EXIT\n",microservice_command) == 0){
+                break;
+            }
+            if(write(pipe_fds[1],microservice_command,strlen(microservice_command)) < 0){
+                fprintf(stderr, "Thread failed to write to ms fd: %s\n",strerror(errno));
+            }
+            memset(microservice_command, 0, 1024);
         }
     }
     // char inbuf[1024];
@@ -237,6 +243,7 @@ void* microservice_listener_thread(void* arg){
     //     // puts("wait");
     // }
     puts("microservice exit");
+    microservice_fd = STDIN_FILENO;
     pthread_exit(NULL);
 }
 
@@ -457,25 +464,28 @@ int main() {
         free(subset);
         return 1;
     }
-    int microservice_fd = -1;
+    microservice_command = calloc(1024,0);
     if (pthread_create(&microservice_thread, NULL, microservice_listener_thread, &microservice_fd) != 0) {
         perror("pthread_create");
         free(subset);
+        free(microservice_command);
         return 1;
     }
-    void* retval;
-    pthread_join(microservice_thread, &retval);
-    printf("Microservice fd: %d\n",microservice_fd);
+    // void* retval;
+    // pthread_join(microservice_thread, &retval);
+    // printf("Microservice fd: %d\n",microservice_fd);
 
     pthread_t cleanup_thread;
     if (pthread_create(&cleanup_thread, NULL, subscriber_cleanup_thread, NULL) != 0) {
         perror("pthread_create cleanup");
+        free(microservice_command);
         exit(1);
     }
 
     pthread_detach(listener_thread); 
     run_publisher_loop(server_sock, subs);// input publisher loop
 
+    free(microservice_command);
     free(subset);
     close(server_sock);
     close(hb_sock);

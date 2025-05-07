@@ -89,7 +89,7 @@ int main(int argc, char* argv[]){
     // }
     int pub_status, sub_status;
     char to_send[1024] = {0};
-    puts("Parent loop");
+    // puts("Parent loop");
     while(1){
         memset(to_send, 0, sizeof(to_send));
         // printf("Microservice command> ");
@@ -98,12 +98,13 @@ int main(int argc, char* argv[]){
             close(pub_socket);
             return EXIT_FAILURE;
         }
+        printf("Microservice to send: %s\n",to_send);
         if(send(conn_fd,to_send,strlen(to_send),0) < 0){
             fprintf(stderr, "Error: Failed to send data. %s.\n", strerror(errno));
             close(pub_socket);
             return EXIT_FAILURE;
         }
-        puts("End of loop");
+        // puts("End of loop");
     }
 
 
