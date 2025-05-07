@@ -1,5 +1,7 @@
 subscriber
 publisher
+zmq_subscriber
+zmq_publisher
 .vscode/
 wrk2/
 wrk
