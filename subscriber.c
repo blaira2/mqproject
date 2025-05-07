@@ -20,7 +20,7 @@
 #define DEFAULT_PORT 5555
 #define MICROSERVICE_PORT 4444
 #define HEARTBEAT_PORT 5554
-#define HEARTBEAT_INTERVAL 3
+#define HEARTBEAT_INTERVAL 1
 #define BROADCAST_IP "127.255.255.255"
 #define SYSTEM_ID 99
 
@@ -206,7 +206,6 @@ void receive_loop(int sock, const char *sub_topic) {
         struct io_uring_cqe *cqe;
         io_uring_wait_cqe(&ring, &cqe);
         if(!cqe) {
-            printf("Completion queue is empty, skipping...\n");
             continue;
             // exit(EXIT_FAILURE);
         }
