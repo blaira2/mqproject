@@ -23,18 +23,20 @@ gcc -o subscriber subscriber.c
 
 ## Usage
 
-1. Start the publisher:
+1. Start one or more publishers:
 ```bash
 ./publisher
 ```
 
 2. Start one or more subscribers:
 ```bash
-./subscriber
+./subscriber <topic>
 ```
 
 3. Publishing messages:
 In the publisher terminal, use the format: 
+```bash
+<topic> <message>
 ```
 
 ## Features
