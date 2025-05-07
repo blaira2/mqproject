@@ -19,6 +19,12 @@ int main(int argc, char* argv[]){
         "TestData",
         "StaffingData",
     };
+    char* messages[] = { 
+        "Doctor info received",
+        "Patient results available",
+        "Test data needs to be processed",
+        "Staff need to be hired",
+    };
     srand(time(NULL));
 
     int pub_pid = fork();
@@ -42,28 +48,26 @@ int main(int argc, char* argv[]){
     char* topic = calloc(MAX_TOPIC_LEN, 1);
     strncpy(topic, topics[num], MAX_TOPIC_LEN);
 
-    int sub_pid = fork();
-    if(sub_pid < 0){
-        fprintf(stderr,"Fork for subscriber failed: %s\n",strerror(errno));
-        exit(EXIT_FAILURE);
-    }
+    // int sub_pid = fork();
+    // if(sub_pid < 0){
+    //     fprintf(stderr,"Fork for subscriber failed: %s\n",strerror(errno));
+    //     exit(EXIT_FAILURE);
+    // }
 
     
-    if(argc > 1){
-        topic = argv[1];
-    }
-    if(sub_pid == 0){
-        char* args[] = {
-            "subscriber",
-            "127.0.0.1",
-            topic,
-            NULL
-        };
-        // puts("Going to start subscriber");
-        execv("./subscriber",args);
-    }
-    // puts("After forks");
-    // sleep(1);
+    // if(argc > 1){
+    //     topic = argv[1];
+    // }
+    // if(sub_pid == 0){
+    //     char* args[] = {
+    //         "subscriber",
+    //         "127.0.0.1",
+    //         topic,
+    //         NULL
+    //     };
+    //     // puts("Going to start subscriber");
+    //     execv("./subscriber",args);
+    // }
 
     //act as a server (send and maybe receive messages)
 
@@ -115,6 +119,9 @@ int main(int argc, char* argv[]){
             memset(message, 0, MAX_BUFFER_SIZE + MAX_TOPIC_LEN);
             num = rand() % topic_count;
             strncpy(message, topics[num], MAX_TOPIC_LEN);
+            strcat(message, " ");
+            num = rand() % topic_count;
+            strncat(message, messages[num], MAX_TOPIC_LEN);
             strcat(message, " new message\0");
             // printf("Microservice to send: %s\n",message);
             if(send(conn_fd,message,strlen(message),0) < 0){
