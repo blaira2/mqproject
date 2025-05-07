@@ -17,6 +17,8 @@
 #define DEFAULT_ADDR "127.0.0.1"
 #define ZMQ_ADDR "tcp://127.0.0.1:5556"
 
+#define REQ_COUNT 200000
+
 double getdetlatimeofday(struct timeval *begin, struct timeval *end) {
     return (end->tv_sec + end->tv_usec * 1.0 / 1000000) -
            (begin->tv_sec + begin->tv_usec * 1.0 / 1000000);
@@ -151,9 +153,11 @@ int main(int argc, char* argv[]){
     char* message = calloc(MAX_BUFFER_SIZE + MAX_TOPIC_LEN, 1);
     // strncpy(message, topic, MAX_TOPIC_LEN);
     while(1){
+START_WHILE:
         // int iterations = (rand() % 500) + 10;
         gettimeofday(&begin, NULL);
-        for(int i = 0; i < 10000; i++){
+        int dropped = 0;
+        for(int i = 0; i < REQ_COUNT; i++){
             memset(message, 0, MAX_BUFFER_SIZE + MAX_TOPIC_LEN);
             num = rand() % topic_count;
             strncpy(message, topics[num], MAX_TOPIC_LEN);
@@ -163,7 +167,9 @@ int main(int argc, char* argv[]){
             strcat(message, " new message\0");
             // printf("Microservice to send: %s\n",message);
             if(send(conn_fd,message,strlen(message),MSG_NOSIGNAL) < 0){
-                // fprintf(stderr, "Error: Failed to send data. %s.\n", strerror(errno));
+                dropped = 1;
+                fprintf(stderr, "Error: Failed to send data. %s.\n", strerror(errno));
+                goto START_WHILE;
                 // goto EXIT;
                 // continue;
             }
@@ -172,7 +178,7 @@ int main(int argc, char* argv[]){
         }
         gettimeofday(&end, NULL);
         double delta = getdetlatimeofday(&begin, &end);
-        printf("Finished sending 10000 requests in %.10f seconds\n",delta);
+        printf("Finished sending %d requests in %.10f seconds\n",REQ_COUNT,delta);
         sleep(1);
     }
 
