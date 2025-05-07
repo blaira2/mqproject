@@ -147,15 +147,17 @@ void handle_messaging(subscriber_t *subs) {
 
     // data received from microservice input
     if(read(pipe_fds[0],input,sizeof(input)) < 0){
-        fprintf(stderr, "Could not read from ms fd: %s\n",strerror(errno));
+        // fprintf(stderr, "Could not read from ms fd: %s\n",strerror(errno));
         return;
     }
-    int amount = atoi(strtok(input, " "));
-    char *topic = strtok(NULL, " ");
+    // int amount = atoi(strtok(input, " "));
+    char *topic = strtok(input, " ");
     char *msg = strtok(NULL, "\n");
 
+    printf("topic: %s. message: %s\n", topic, msg);
+
     if (!topic || !msg) {
-        printf("Usage: <amount> <topic> <message>\n");
+        printf("Usage: <topic> <message>\n");
         return;
     }
     if( strlen(topic) > MAX_TOPIC_LEN){
@@ -171,7 +173,7 @@ void handle_messaging(subscriber_t *subs) {
             for (int t = 0; t < subs[i].topic_count; t++) {
                 if (topic_matches(topic, subs[i].topics[t])) {
                     // strcat(msg, "\0");
-                    for(int j = 0; j < amount; j++){
+                    for(int j = 0; j < 1; j++){
                         debug_subscription_matching(subs, topic, msg); //print out a bunch of stuff
                         // usleep(100);
                         send(subs[i].tcp_sock, msg, strlen(msg), 0);
