@@ -10,6 +10,9 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <errno.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 
 #define MAX_SUBS 128
 #define MAX_TOPIC_LEN 64
@@ -150,7 +153,6 @@ void handle_messaging(subscriber_t *subs) {
     char *topic = strtok(NULL, " ");
     char *msg = strtok(NULL, "\n");
 
-
     if (!topic || !msg) {
         printf("Usage: <amount> <topic> <message>\n");
         return;
@@ -161,16 +163,19 @@ void handle_messaging(subscriber_t *subs) {
     }
 
 
-    for(int j = 0; j < amount; j++){
-        debug_subscription_matching(subs, topic, msg); //print out a bunch of stuff
-        // check all subs/topics
-        for (int i = 0; i < MAX_SUBS; i++) {
-            if (subs[i].tcp_sock >= 0 && subs[i].topic_received) {
-                for (int t = 0; t < subs[i].topic_count; t++) {
-                    if (topic_matches(topic, subs[i].topics[t])) {
+    // check all subs/topics
+    for (int i = 0; i < MAX_SUBS; i++) {
+        if (subs[i].tcp_sock >= 0 && subs[i].topic_received) {
+            for (int t = 0; t < subs[i].topic_count; t++) {
+                if (topic_matches(topic, subs[i].topics[t])) {
+                    // strcat(msg, "\0");
+                    for(int j = 0; j < amount; j++){
+                        debug_subscription_matching(subs, topic, msg); //print out a bunch of stuff
+                        // usleep(100);
                         send(subs[i].tcp_sock, msg, strlen(msg), 0);
-                        break;  // no need to check other subscripts
+                        // send(subs[i].tcp_sock, "\0", strlen("\0"), 0);
                     }
+                    break;  // no need to check other subscripts
                 }
             }
         }
@@ -408,7 +413,7 @@ int main() {
     // }
 
     int opt = 1;
-    setsockopt(server_sock, SOL_SOCKET, SO_REUSEPORT | SO_REUSEADDR | SO_BROADCAST, &opt, sizeof(opt));
+    setsockopt(server_sock, SOL_SOCKET, SO_REUSEPORT | SO_REUSEADDR | SO_BROADCAST | TCP_NODELAY, &opt, sizeof(opt));
 
     // Setup UDP heartbeat socket for listening for subscribers
     int hb_sock = socket(AF_INET, SOCK_DGRAM, 0);
