@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-g
+CFLAGS=-g -O3
 LDFLAGS=-luring
 MAKEFLAGS=-j$(nproc)
 
