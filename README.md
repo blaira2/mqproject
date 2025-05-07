@@ -36,7 +36,7 @@ gcc -o subscriber subscriber.c
 3. Publishing messages:
 In the publisher terminal, use the format: 
 ```bash
-<topic> message
+<topic> <message>
 ```
 
 ## Features
