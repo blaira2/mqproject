@@ -20,7 +20,7 @@
 #define DEFAULT_PORT 5555
 #define MICROSERVICE_PORT 4444
 #define HEARTBEAT_PORT 5554
-#define HEARTBEAT_INTERVAL 3
+#define HEARTBEAT_INTERVAL 1
 #define BROADCAST_IP "127.255.255.255"
 #define SYSTEM_ID 99
 
@@ -206,7 +206,6 @@ void receive_loop(int sock, const char *sub_topic) {
         struct io_uring_cqe *cqe;
         io_uring_wait_cqe(&ring, &cqe);
         if(!cqe) {
-            printf("Completion queue is empty, skipping...\n");
             continue;
             // exit(EXIT_FAILURE);
         }
@@ -242,8 +241,8 @@ void receive_loop(int sock, const char *sub_topic) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 3) {
-        fprintf(stderr, "Usage: %s <publisher_ip> <topic>\n", argv[0]);
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <topic>\n", argv[0]);
         return 1;
     }
     //generate unique system id
@@ -261,9 +260,9 @@ int main(int argc, char *argv[]) {
     // set up TCP listen socket
     int listen_fd = setup_listen_socket(&listen_port);
 
-    const char *ip = argv[1];
+    //const char *ip = argv[1];
     //int port = atoi(argv[2]);
-    const char *topic = argv[2];
+    const char *topic = argv[1];
 
     int hb_sock = setup_heartbeat();
     pthread_t hb_thread;
