@@ -1,3 +1,5 @@
+#sudo apt install liburing-dev
+#sudo apt install libczmq-dev
 CC=gcc
 CFLAGS=-g -O3
 LDFLAGS=-luring
