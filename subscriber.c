@@ -18,6 +18,7 @@
 #define MAX_TOPIC_LEN 64
 #define TOPIC_CAPACITY 16
 #define DEFAULT_PORT 5555
+#define MICROSERVICE_PORT 4444
 #define HEARTBEAT_PORT 5554
 #define HEARTBEAT_INTERVAL 3
 #define BROADCAST_IP "127.255.255.255"
@@ -169,7 +170,7 @@ int add_read_request(int client_socket) {
 int setup_listen_socket(uint16_t *out_port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     int yes = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &yes, sizeof(yes));
 
     struct sockaddr_in addr = {
         .sin_family = AF_INET,

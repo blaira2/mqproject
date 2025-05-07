@@ -9,12 +9,14 @@
 #include <pthread.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <errno.h>
 
 #define MAX_SUBS 128
 #define MAX_TOPIC_LEN 64
 #define TOPIC_CAPACITY 16
 #define MAX_BUFFER_SIZE 1024
 #define DEFAULT_PORT 5555
+#define MICROSERVICE_PORT 4444
 #define HEARTBEAT_PORT 5554
 #define SUBSCRIBER_TIMEOUT 10 
 
@@ -41,6 +43,11 @@ typedef struct {
     int socket; //publisher socket
     subscriber_t *subs;
 } subs_t;
+
+struct microservice_params {
+    int server_fd;
+    struct pollfd* fds;
+};
 
 int new_stdin;
 
@@ -118,9 +125,16 @@ void debug_subscription_matching(subscriber_t *subs, const char *topic, const ch
 void handle_messaging(subscriber_t *subs) {
     char input[MAX_BUFFER_SIZE] = {0};
 
-    if (!fgets(input, sizeof(input), stdin)) {
-        return;
-    }
+    // if (!fgets(input, sizeof(input), stdin)) {
+        // return;
+    // }
+    /*
+    Start microservice listening in beginning and wait for microservice to connect
+    Save that fd
+    pass it to handle_messaging
+    poll() in here to listen to both
+    */
+    //poll() here
     // if(read(fd_from_microservice_request_or_stdin,input,sizeof(input)) < 0){
     //     return;
     // }
@@ -129,7 +143,7 @@ void handle_messaging(subscriber_t *subs) {
     char *msg = strtok(NULL, "\n");
 
     if (!topic || !msg) {
-        printf("Usage: <topic> <message>\n");
+        // printf("Usage: <topic> <message>\n");
         return;
     }
     if( strlen(topic) > MAX_TOPIC_LEN){
@@ -152,11 +166,61 @@ void handle_messaging(subscriber_t *subs) {
 }
 
 void* microservice_listener_thread(void* arg){
+    //act as client - receive message from server
+
     printf("microservice listener started\n");
-
-    while(1){
-
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if(sockfd < 0){
+        fprintf(stderr, "Thread failed to create socket: %s\n",strerror(errno));
     }
+    struct sockaddr_in ms_addr;
+    ms_addr.sin_family = AF_INET;
+    ms_addr.sin_port = htons(MICROSERVICE_PORT);
+    ms_addr.sin_addr.s_addr = INADDR_ANY;
+    int addrlen = sizeof(ms_addr);
+
+    // int new_sock = accept(sockfd-1, (struct sockaddr*) &ms_addr, &addrlen);
+    // printf("Sock: %d. new_sock: %d\n",sockfd,new_sock);
+    sleep(1);
+    int conn = connect(sockfd, (struct sockaddr*) &ms_addr, sizeof(ms_addr));
+    char inbuf[1024];
+    if(conn < 0){
+        fprintf(stderr, "Thread failed to connect: %s\n",strerror(errno));
+    }
+    else {
+        int recvbytes = recv(sockfd, inbuf, sizeof(inbuf), 0);
+        if(recvbytes < 0){
+            fprintf(stderr, "Thread failed to receive: %s\n",strerror(errno));
+        }
+        printf("Recv data: %s\n",inbuf);
+    }
+    // char inbuf[1024];
+    // printf("server fd: %d\n",((struct microservice_params*)(arg))->server_fd);
+    // int bytes_recvd = recv( ((struct microservice_params*)(arg))->server_fd, inbuf, MAX_TOPIC_LEN, 0);
+    // if(bytes_recvd == -1){
+    //     fprintf(stderr, "Failed to receive bytes: %s\n",strerror(errno));
+    // }
+    // while(1){
+
+    //     int retval = poll(arg,(unsigned long)2,-1);
+    //     if(retval < 0){
+    //         fprintf(stderr, "Error while polling: %s\n",strerror(errno));
+    //         break;
+    //     }
+    //     // if(((struct pollfd*)arg)[0].revents & POLLIN){
+    //         // puts("read stdin");
+    //     // }
+    //     // if(((struct pollfd*)arg)[1].revents & POLLIN){
+    //         // puts("read nostdin");
+    //     // }
+    //     else {
+    //         // printf("%d\n",POLLOUT);
+    //         // printf("revent: %d\n",((struct pollfd*)arg)[1].revents);
+    //     }
+    //     // puts("wait");
+    // }
+    puts("microservice exit");
+    pthread_exit(NULL);
 }
 
 
@@ -291,14 +355,33 @@ int main() {
         return 1;
     }
 
-    int opt = 1;
-    setsockopt(server_sock, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
-
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_addr.s_addr = INADDR_ANY,
         .sin_port = htons(DEFAULT_PORT),
     };
+
+    socklen_t addr_len = sizeof(struct sockaddr_in);
+
+    // if(bind(server_sock, (struct sockaddr*) &addr, sizeof(addr)) < 0){
+    //     fprintf(stderr, "Error: failed to bind socket: %s\n",strerror(errno));
+    //     exit(EXIT_FAILURE);
+    // }
+
+    // if(listen(server_sock, 1) < 0){
+    //     fprintf(stderr, "Error: failed to listen on socket %d. %s\n",server_sock,strerror(errno));
+    //     exit(EXIT_FAILURE);
+    // }
+    
+    // int new_fd = accept(server_sock,(struct sockaddr*) &addr, &addr_len);
+
+    // if(new_fd < 0 && errno != EINTR){
+    //     fprintf(stderr, "Error: failed to accept: %s\n",strerror(errno));
+    //     exit(EXIT_FAILURE);
+    // }
+
+    int opt = 1;
+    setsockopt(server_sock, SOL_SOCKET, SO_REUSEPORT | SO_REUSEADDR | SO_BROADCAST, &opt, sizeof(opt));
 
     // Setup UDP heartbeat socket for listening for subscribers
     int hb_sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -343,14 +426,13 @@ int main() {
     fds[0].events = POLLIN | POLLOUT;
     fds[1].fd = STDIN_FILENO;
     fds[1].events = POLLIN | POLLOUT;
-    poll(fds,2,-1);
 
     pthread_t microservice_thread;
-    if (pthread_create(&microservice_thread, NULL, microservice_listener_thread, NULL) != 0) {
-        perror("pthread_create");
-        free(subset);
-        return 1;
-    }
+    
+    struct microservice_params ms_params = {
+        .server_fd = server_sock,
+        .fds = fds,
+    };
 
     pthread_t listener_thread;
     if (pthread_create(&listener_thread, NULL, subscription_listener_thread, subset) != 0) {
@@ -358,6 +440,13 @@ int main() {
         free(subset);
         return 1;
     }
+    if (pthread_create(&microservice_thread, NULL, microservice_listener_thread, &fds) != 0) {
+        perror("pthread_create");
+        free(subset);
+        return 1;
+    }
+    void* retval;
+    pthread_join(microservice_thread, &retval);
 
     pthread_t cleanup_thread;
     if (pthread_create(&cleanup_thread, NULL, subscriber_cleanup_thread, NULL) != 0) {
