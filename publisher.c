@@ -55,6 +55,7 @@ struct microservice_params {
 int new_stdin;
 
 static subscriber_t subs[MAX_SUBS];
+pthread_mutex_t subs_lock; //threadsafety for subs list
 
 char* microservice_command;
 int microservice_fd = -1;
@@ -165,6 +166,7 @@ void handle_messaging(subscriber_t *subs) {
 
     // check all subs/topics
     for (int i = 0; i < MAX_SUBS; i++) {
+        pthread_mutex_lock(&subs_lock);
         if (subs[i].tcp_sock >= 0 && subs[i].topic_received) {
             for (int t = 0; t < subs[i].topic_count; t++) {
                 if (topic_matches(topic, subs[i].topics[t])) {
@@ -179,6 +181,7 @@ void handle_messaging(subscriber_t *subs) {
                 }
             }
         }
+        pthread_mutex_unlock(&subs_lock);
     }
 
 }
@@ -305,6 +308,7 @@ void *subscription_listener_thread(void *arg) {
             continue; //if no free slots ignore
         }
         // Update heartbeat timestamp
+        pthread_mutex_lock(&subs_lock);
         subs[slot].ip_addr = sender_ip;
         subs[slot].port = sender_port;
         subs[slot].last_heartbeat = time(NULL);
@@ -334,6 +338,7 @@ void *subscription_listener_thread(void *arg) {
                        inet_ntoa(*(struct in_addr *)&sender_ip));
             }
         }
+        pthread_mutex_unlock(&subs_lock);
     }
 
     printf("[PUB] Exiting heartbeat listener thread.\n");
@@ -349,7 +354,7 @@ void *subscriber_cleanup_thread(void *arg) {
 
         for (int i = 0; i < MAX_SUBS; i++) {
             subscriber_t *sub = &subs[i];
-
+            pthread_mutex_lock(&subs_lock);
             if (sub->tcp_sock >= 0 && (now - sub->last_heartbeat) > SUBSCRIBER_TIMEOUT) {
                 struct in_addr in = { .s_addr = sub->ip_addr };
                 printf("[PUB] Unsubscribing %s:%u due to inactivity\n",
@@ -365,6 +370,7 @@ void *subscriber_cleanup_thread(void *arg) {
                 sub->topic_received  = 0;
                 sub->last_heartbeat  = 0;
             }
+            pthread_mutex_unlock(&subs_lock);
         }
     }
     return NULL;
