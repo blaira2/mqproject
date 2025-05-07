@@ -141,18 +141,18 @@ void debug_subscription_matching(subscriber_t *subs, const char *topic, const ch
 void handle_messaging(subscriber_t *subs) {
     char input[MAX_BUFFER_SIZE] = {0};
 
-    // printf("Microservice fd handle messaging: %d\n",microservice_fd);
+    // data received from microservice input
     if(read(pipe_fds[0],input,sizeof(input)) < 0){
         fprintf(stderr, "Could not read from ms fd: %s\n",strerror(errno));
-        // return;
+        return;
     }
-
-    char *topic = strtok(input, " ");
+    int amount = atoi(strtok(input, " "));
+    char *topic = strtok(NULL, " ");
     char *msg = strtok(NULL, "\n");
 
 
     if (!topic || !msg) {
-        printf("Usage: <topic> <message>\n");
+        printf("Usage: <amount> <topic> <message>\n");
         return;
     }
     if( strlen(topic) > MAX_TOPIC_LEN){
@@ -160,19 +160,22 @@ void handle_messaging(subscriber_t *subs) {
         return;
     }
 
-    debug_subscription_matching(subs, topic, msg); //print out a bunch of stuff
 
-    // check all subs/topics
-    for (int i = 0; i < MAX_SUBS; i++) {
-        if (subs[i].tcp_sock >= 0 && subs[i].topic_received) {
-            for (int t = 0; t < subs[i].topic_count; t++) {
-                if (topic_matches(topic, subs[i].topics[t])) {
-                    send(subs[i].tcp_sock, msg, strlen(msg), 0);
-                    break;  // no need to check other subscripts
+    for(int j = 0; j < amount; j++){
+        debug_subscription_matching(subs, topic, msg); //print out a bunch of stuff
+        // check all subs/topics
+        for (int i = 0; i < MAX_SUBS; i++) {
+            if (subs[i].tcp_sock >= 0 && subs[i].topic_received) {
+                for (int t = 0; t < subs[i].topic_count; t++) {
+                    if (topic_matches(topic, subs[i].topics[t])) {
+                        send(subs[i].tcp_sock, msg, strlen(msg), 0);
+                        break;  // no need to check other subscripts
+                    }
                 }
             }
         }
     }
+
 }
 
 void* microservice_listener_thread(void* arg){
