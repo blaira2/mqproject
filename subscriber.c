@@ -241,8 +241,8 @@ void receive_loop(int sock, const char *sub_topic) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 3) {
-        fprintf(stderr, "Usage: %s <publisher_ip> <topic>\n", argv[0]);
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <topic>\n", argv[0]);
         return 1;
     }
     //generate unique system id
@@ -260,9 +260,9 @@ int main(int argc, char *argv[]) {
     // set up TCP listen socket
     int listen_fd = setup_listen_socket(&listen_port);
 
-    const char *ip = argv[1];
+    //const char *ip = argv[1];
     //int port = atoi(argv[2]);
-    const char *topic = argv[2];
+    const char *topic = argv[1];
 
     int hb_sock = setup_heartbeat();
     pthread_t hb_thread;
