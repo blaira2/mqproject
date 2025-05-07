@@ -7,6 +7,7 @@
 
 #define MAX_TOPIC 256
 #define MAX_MSG   1024
+#define PORT      5556
 
 //like ./subscriber_zmq tcp://localhost:5556 news
 int main(int argc, char *argv[]) {

@@ -146,6 +146,11 @@ void handle_messaging(subscriber_t *subs) {
     char input[MAX_BUFFER_SIZE] = {0};
 
     // data received from microservice input
+    // printf("pipe_fds: %d %d\n", pipe_fds[0], pipe_fds[1]);
+    if(pipe_fds[0] == STDIN_FILENO){
+        //try again to ensure that only messages from microservice are received
+        return;
+    }
     if(read(pipe_fds[0],input,sizeof(input)) < 0){
         // fprintf(stderr, "Could not read from ms fd: %s\n",strerror(errno));
         return;
@@ -154,7 +159,7 @@ void handle_messaging(subscriber_t *subs) {
     char *topic = strtok(input, " ");
     char *msg = strtok(NULL, "\n");
 
-    printf("topic: %s. message: %s\n", topic, msg);
+    // printf("topic: %s. message: %s\n", topic, msg);
 
     if (!topic || !msg) {
         printf("Usage: <topic> <message>\n");
@@ -174,7 +179,7 @@ void handle_messaging(subscriber_t *subs) {
                 if (topic_matches(topic, subs[i].topics[t])) {
                     // strcat(msg, "\0");
                     for(int j = 0; j < 1; j++){
-                        debug_subscription_matching(subs, topic, msg); //print out a bunch of stuff
+                        // debug_subscription_matching(subs, topic, msg); //print out a bunch of stuff
                         // usleep(100);
                         send(subs[i].tcp_sock, msg, strlen(msg), 0);
                         // send(subs[i].tcp_sock, "\0", strlen("\0"), 0);

@@ -6,13 +6,42 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <time.h>
+#include <signal.h>
+#include <sys/socket.h>
 
-// #define DEFAULT_PORT 5555
-#define MICROSERVICE_PORT 4444
+#define DEFAULT_PORT 4444
+#define ZMQ_PORT 5556
 #define MAX_TOPIC_LEN 64
 #define MAX_BUFFER_SIZE 1024
+#define DEFAULT_ADDR "127.0.0.1"
+#define ZMQ_ADDR "tcp://*:5556"
 
 int main(int argc, char* argv[]){
+    char* usage = "Usage: %s <\"reg\"|\"zmq\">\n";
+    if(argc != 2){
+        printf(usage,argv[0]);
+        return 1;
+    }
+
+    char* pub_prog, *endpoint;
+    int port = DEFAULT_PORT;
+    if(strcmp(argv[1], "reg") == 0){
+        pub_prog = "./publisher";
+        endpoint = DEFAULT_ADDR;
+    }
+    else if(strcmp(argv[1], "zmq") == 0){
+        pub_prog = "./zmq_publisher";
+        endpoint = ZMQ_ADDR;
+        // port = ZMQ_PORT;
+    }
+    else {
+        printf(usage,argv[0]);
+        return 1;
+    }
+
+    //don't fail if a subscriber drops out
+    signal(SIGPIPE, SIG_IGN);
+
     char* topics[] = {
         "DoctorInfo",
         "PatientResults",
@@ -36,7 +65,7 @@ int main(int argc, char* argv[]){
     //fork and exec to spawn publisher
     if(pub_pid == 0){
         // puts("Going to start publisher");
-        execl("./publisher","publisher",NULL);
+        execl(pub_prog,"zmq_publisher",NULL);
     }
     else {
         // puts("parent");
@@ -54,10 +83,6 @@ int main(int argc, char* argv[]){
     //     exit(EXIT_FAILURE);
     // }
 
-    
-    // if(argc > 1){
-    //     topic = argv[1];
-    // }
     // if(sub_pid == 0){
     //     char* args[] = {
     //         "subscriber",
@@ -75,9 +100,11 @@ int main(int argc, char* argv[]){
     socklen_t addr_size = sizeof(pub_addr);
     pub_addr.sin_family = AF_INET;
     pub_addr.sin_addr.s_addr = INADDR_ANY;
-    pub_addr.sin_port = htons(MICROSERVICE_PORT);
+    pub_addr.sin_port = htons(port);
 
     int pub_socket = socket(AF_INET, SOCK_STREAM, 0);
+    int opt = 1;
+    setsockopt(pub_socket, SOL_SOCKET, MSG_NOSIGNAL, &opt, sizeof(int));
     if(pub_socket < 0){
         fprintf(stderr,"Error on socket: %s\n",strerror(errno));
         goto EXIT;
@@ -96,6 +123,8 @@ int main(int argc, char* argv[]){
     int len = sizeof(client);
     // puts("About to accept");
     int conn_fd = accept(pub_socket, (struct sockaddr*) &client, &len);
+    setsockopt(conn_fd, SOL_SOCKET, MSG_NOSIGNAL, &opt, sizeof(int));
+
     if(conn_fd < 0){
         fprintf(stderr, "microservice server failed to accept: %s\n",strerror(errno));
         goto EXIT;
@@ -114,8 +143,8 @@ int main(int argc, char* argv[]){
     char* message = calloc(MAX_BUFFER_SIZE + MAX_TOPIC_LEN, 1);
     // strncpy(message, topic, MAX_TOPIC_LEN);
     while(1){
-        int iterations = (rand() % 500) + 10;
-        for(int i = 0; i < iterations; i++){
+        // int iterations = (rand() % 500) + 10;
+        for(int i = 0; i < 10000; i++){
             memset(message, 0, MAX_BUFFER_SIZE + MAX_TOPIC_LEN);
             num = rand() % topic_count;
             strncpy(message, topics[num], MAX_TOPIC_LEN);
@@ -124,11 +153,12 @@ int main(int argc, char* argv[]){
             strncat(message, messages[num], MAX_TOPIC_LEN);
             strcat(message, " new message\0");
             // printf("Microservice to send: %s\n",message);
-            if(send(conn_fd,message,strlen(message),0) < 0){
-                fprintf(stderr, "Error: Failed to send data. %s.\n", strerror(errno));
-                goto EXIT;
+            if(send(conn_fd,message,strlen(message),MSG_NOSIGNAL) < 0){
+                // fprintf(stderr, "Error: Failed to send data. %s.\n", strerror(errno));
+                // goto EXIT;
+                // continue;
             }
-            usleep(500);
+            usleep(300);
         }
         sleep(1);
     }
