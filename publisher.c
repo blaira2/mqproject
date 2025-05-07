@@ -194,18 +194,22 @@ void* microservice_listener_thread(void* arg){
 
     // int new_sock = accept(sockfd-1, (struct sockaddr*) &ms_addr, &addrlen);
     // printf("Sock: %d. new_sock: %d\n",sockfd,new_sock);
-    sleep(1);
+    // sleep(1);
     int conn = connect(sockfd, (struct sockaddr*) &ms_addr, sizeof(ms_addr));
     char inbuf[1024];
     if(conn < 0){
         fprintf(stderr, "Thread failed to connect: %s\n",strerror(errno));
     }
     else {
-        int recvbytes = recv(sockfd, inbuf, sizeof(inbuf), 0);
-        if(recvbytes < 0){
-            fprintf(stderr, "Thread failed to receive: %s\n",strerror(errno));
+        *(int*)arg = sockfd;
+        while(1){
+            int recvbytes = recv(sockfd, inbuf, sizeof(inbuf), 0);
+            if(recvbytes < 0){
+                fprintf(stderr, "Thread failed to receive: %s\n",strerror(errno));
+            }
+            printf("Recv data: %s\n",inbuf);
+            memset(inbuf, 0, sizeof(inbuf));
         }
-        printf("Recv data: %s\n",inbuf);
     }
     // char inbuf[1024];
     // printf("server fd: %d\n",((struct microservice_params*)(arg))->server_fd);
@@ -453,13 +457,15 @@ int main() {
         free(subset);
         return 1;
     }
-    if (pthread_create(&microservice_thread, NULL, microservice_listener_thread, &fds) != 0) {
+    int microservice_fd = -1;
+    if (pthread_create(&microservice_thread, NULL, microservice_listener_thread, &microservice_fd) != 0) {
         perror("pthread_create");
         free(subset);
         return 1;
     }
     void* retval;
     pthread_join(microservice_thread, &retval);
+    printf("Microservice fd: %d\n",microservice_fd);
 
     pthread_t cleanup_thread;
     if (pthread_create(&cleanup_thread, NULL, subscriber_cleanup_thread, NULL) != 0) {

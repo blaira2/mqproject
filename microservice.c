@@ -50,8 +50,6 @@ int main(int argc, char* argv[]){
 
     //act as a server (send and maybe receive messages)
 
-    char* to_send = "test2";
-
     struct sockaddr_in pub_addr, client;
     socklen_t addr_size = sizeof(pub_addr);
     pub_addr.sin_family = AF_INET;
@@ -89,10 +87,25 @@ int main(int argc, char* argv[]){
     //     fprintf(stderr, "Error: Failed to create socket. %s.\n", strerror(errno));
     //     return EXIT_FAILURE;
     // }
-    if(send(conn_fd,to_send,strlen(to_send),0) < 0){
-        fprintf(stderr, "Error: Failed to send data. %s.\n", strerror(errno));
-        return EXIT_FAILURE;
+    int pub_status, sub_status;
+    char to_send[1024] = {0};
+    puts("Parent loop");
+    while(1){
+        memset(to_send, 0, sizeof(to_send));
+        // printf("Microservice command> ");
+        if(!fgets(to_send, sizeof(to_send), stdin)){
+            fprintf(stderr, "Error: fgets failed. %s.\n", strerror(errno));
+            close(pub_socket);
+            return EXIT_FAILURE;
+        }
+        if(send(conn_fd,to_send,strlen(to_send),0) < 0){
+            fprintf(stderr, "Error: Failed to send data. %s.\n", strerror(errno));
+            close(pub_socket);
+            return EXIT_FAILURE;
+        }
+        puts("End of loop");
     }
+
 
     // char buff[1024];
     // int n;
