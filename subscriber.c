@@ -176,7 +176,7 @@ void *input_thread(void *arg) {
             continue;
         }
 
-        if(strcmp(cmd,"stat")){
+        if(strcmp(cmd,"stat") == 0){
             uint64_t reads    = atomic_load(&sub_read);
             uint64_t errors   = atomic_load(&sub_read_err);
             uint64_t closed   = atomic_load(&sub_closed);
@@ -332,6 +332,9 @@ int main(int argc, char *argv[]) {
     int hb_sock = setup_heartbeat();
     pthread_t hb_thread;
     pthread_create(&hb_thread, NULL, heartbeat_thread, &hb_sock);
+    // accept input commands
+    pthread_t inp_thread;
+    pthread_create(&inp_thread, NULL, input_thread, NULL);
  
     receive_loop(listen_fd, topic);
     puts("Subscriber exit");
