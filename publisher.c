@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <stdatomic.h>
 
 #define MAX_SUBS 128
 #define MAX_TOPIC_LEN 64
@@ -48,6 +49,9 @@ typedef struct {
 
 static subscriber_t subs[MAX_SUBS];
 pthread_mutex_t subs_lock; //threadsafety for subs list
+static _Atomic uint64_t pub_success   = 0; 
+static _Atomic uint64_t pub_error  = 0; 
+static _Atomic uint64_t pub_send_part = 0;   /* short write             */
 
 char* microservice_message;
 int microservice_fd = -1;
@@ -159,7 +163,7 @@ void handle_messaging(subscriber_t *subs) {
         printf("Invalid topic\n");
         return;
     }
-
+    int msg_len = strlen(msg);
 
     // check all subs/topics
     for (int i = 0; i < MAX_SUBS; i++) {
@@ -169,8 +173,13 @@ void handle_messaging(subscriber_t *subs) {
                 if (topic_matches(topic, subs[i].topics[t])) {
                     // strcat(msg, "\0");
                     // debug_subscription_matching(subs, topic, msg); //print out a bunch of stuff
-                    // usleep(100);
-                    send(subs[i].tcp_sock, msg, strlen(msg), 0);
+
+                    int result = send(subs[i].tcp_sock, msg, msg_len, 0);
+                    if (result == msg_len) {
+                        atomic_fetch_add(&pub_success, 1);
+                    } else {
+                        atomic_fetch_add(&pub_error, 1);
+                    }
                     // send(subs[i].tcp_sock, "\0", strlen("\0"), 0);
                     break;  // no need to check other subscripts
                 }

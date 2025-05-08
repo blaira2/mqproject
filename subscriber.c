@@ -12,6 +12,7 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <liburing.h>
+#include <stdatomic.h>
 
 #define BUFFER_SIZE 1024
 #define QUEUE_DEPTH 512
@@ -47,11 +48,14 @@ static char **subscribed_topics = NULL;
 static uint16_t topic_count = 0;
 static uint32_t subscriber_id; //to be put in every heartbeat system_id
 static uint16_t listen_port; //find available port
+static _Atomic uint64_t sub_read  = 0;
+static _Atomic uint64_t sub_read_err  = 0;
+static _Atomic uint64_t sub_closed    = 0;
 
 
 // check whether already subscribed
 static int is_subscribed(const char *topic) {
-    for (size_t i = 0; i < topic_count; ++i) {
+    for (int i = 0; i < topic_count; ++i) {
         if (strcmp(subscribed_topics[i], topic) == 0)
             return 1;
     }
@@ -74,6 +78,20 @@ int subscribe_to_topic(const char *topic){
         subscribed_topics[topic_count++] = strdup(topic);
     }
 
+    return 0;
+}
+
+int unsubscribe_from_topic(const char *topic) {
+    for (int i = 0; i < topic_count; ++i) {
+        if (strcmp(subscribed_topics[i], topic) == 0) {
+            free(subscribed_topics[i]);
+            //close the gap
+            for (int j = i; j < topic_count - 1; ++j)
+                subscribed_topics[j] = subscribed_topics[j + 1];
+            subscribed_topics[--topic_count] = NULL;
+            return 1;
+        }
+    }
     return 0;
 }
 
@@ -126,7 +144,7 @@ void *heartbeat_thread(void *arg){
         hb.advertised_port = htons(listen_port);
         hb.topic_count = htons(topic_count);
         // copy each topic string in
-        for (size_t i = 0; i < topic_count; ++i) {
+        for (int i = 0; i < topic_count; ++i) {
             strncpy(hb.topics[i], subscribed_topics[i], MAX_TOPIC_LEN-1);
             hb.topics[i][MAX_TOPIC_LEN-1] = '\0';
         }
@@ -141,6 +159,49 @@ void *heartbeat_thread(void *arg){
         sleep(HEARTBEAT_INTERVAL);
     }
 
+}
+
+void *input_thread(void *arg) {
+
+    char input[BUFFER_SIZE];
+    while (1) {
+        memset(input, 0, sizeof(input));
+
+        fgets(input, sizeof(input), stdin);
+
+        char *cmd = strtok(input, " \n");
+        char *msg = strtok(NULL, " \n");
+
+        if (!cmd ) {
+            continue;
+        }
+
+        if(strcmp(cmd,"stat") == 0){
+            uint64_t reads    = atomic_load(&sub_read);
+            uint64_t errors   = atomic_load(&sub_read_err);
+            uint64_t closed   = atomic_load(&sub_closed);
+            printf("[SUB][STAT] reads=%lu, errors=%lu, closed=%lu\n",
+                   (unsigned long)reads,
+                   (unsigned long)errors,
+                   (unsigned long)closed);
+        }
+        else if (strcmp(cmd,"add") == 0){
+            if (!msg) {
+                printf("Usage: add <topic>\n");
+            } else {
+                subscribe_to_topic(msg);
+            }
+        }
+        else if (strcmp(cmd,"remove") == 0){
+            if (!msg) {
+                printf("Usage: remove <topic>\n");
+            } else {
+                unsubscribe_from_topic(msg);
+                printf("[SUB] Removed subscription for '%s'\n", msg);
+            } 
+        }
+
+    }
 }
 
 int add_accept_request(int server_socket, struct sockaddr_in *client_addr, socklen_t *client_addr_len) {
@@ -213,7 +274,7 @@ void receive_loop(int sock, const char *sub_topic) {
 
         switch (req->type) {
             case TYPE_ACCEPT:
-                printf("Accepted client FD: %d\n", cqe->res);
+                printf("[SUB] Accepted client FD: %d\n", cqe->res);
                 add_accept_request(sock, &address, &addrlen);
             	add_read_request(cqe->res);
 		        break;
@@ -221,13 +282,17 @@ void receive_loop(int sock, const char *sub_topic) {
                 int result = cqe->res;
 		        
                 if (result > 0) {
+                    atomic_fetch_add(&sub_read, 1);
                     char *msg = req->iov[0].iov_base;
                     msg[result] = '\0';
                     // printf("Read from FD: %d: %s\n", req->client_fd, msg);
                     free(msg);
                     add_read_request(req->client_fd);
                     //handle_client_request(req);
-                } else {
+                } else if(result == 0){
+                    atomic_fetch_add(&sub_closed, 1);
+                }else {
+                    atomic_fetch_add(&sub_read_err, 1);
                     close(req->client_fd);
                 }
                 break;
@@ -267,6 +332,9 @@ int main(int argc, char *argv[]) {
     int hb_sock = setup_heartbeat();
     pthread_t hb_thread;
     pthread_create(&hb_thread, NULL, heartbeat_thread, &hb_sock);
+    // accept input commands
+    pthread_t inp_thread;
+    pthread_create(&inp_thread, NULL, input_thread, NULL);
  
     receive_loop(listen_fd, topic);
     puts("Subscriber exit");
