@@ -157,7 +157,6 @@ void handle_messaging(subscriber_t *subs) {
 
     // printf("topic: %s. message: %s\n", topic, msg);
     //special stat case
-    printf("..%s..\n", topic);////////
     if(strcmp(topic,"stat") == 0){
         uint64_t pubs = atomic_load(&pub_success);
         uint64_t errors = atomic_load(&pub_error);
