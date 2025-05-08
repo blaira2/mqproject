@@ -17,7 +17,7 @@
 #define DEFAULT_ADDR "127.0.0.1"
 #define ZMQ_ADDR "tcp://127.0.0.1:5556"
 
-#define REQ_COUNT 1000000
+#define REQ_COUNT 500000
 
 double getdetlatimeofday(struct timeval *begin, struct timeval *end) {
     return (end->tv_sec + end->tv_usec * 1.0 / 1000000) -
@@ -181,6 +181,13 @@ START_WHILE:
         }
         gettimeofday(&end, NULL);
         double delta = getdetlatimeofday(&begin, &end);
+        if(send(conn_fd,"stat stat",strlen("stat stat"),MSG_NOSIGNAL) < 0){
+            dropped = 1;
+            fprintf(stderr, "Error: Failed to send data. %s.\n", strerror(errno));
+            goto START_WHILE;
+            // goto EXIT;
+            // continue;
+        }
         printf("Finished sending %d requests in %.10f seconds\n",REQ_COUNT,delta);
         // sleep(1);
     }

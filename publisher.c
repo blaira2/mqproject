@@ -139,25 +139,25 @@ void debug_subscription_matching(subscriber_t *subs, const char *topic, const ch
 
 void handle_messaging(subscriber_t *subs) {
     char input[MAX_BUFFER_SIZE] = {0};
-    if (!fgets(input, sizeof(input), stdin)) {
-        return;
-    }
+    // if (!fgets(input, sizeof(input), stdin)) {
+        // return;
+    // }
     // data received from microservice input
     // printf("pipe_fds: %d %d\n", pipe_fds[0], pipe_fds[1]);
-    //if(pipe_fds[0] == STDIN_FILENO){
-        //try again to ensure that only messages from microservice are received
-    //    return;
-    //}
-    //if(read(pipe_fds[0],input,sizeof(input)) < 0){
-        // fprintf(stderr, "Could not read from ms fd: %s\n",strerror(errno));
-    //    return;
-    //}
+    if(pipe_fds[0] == STDIN_FILENO){
+        // try again to ensure that only messages from microservice are received
+       return;
+    }
+    if(read(pipe_fds[0],input,sizeof(input)) < 0){
+        fprintf(stderr, "Could not read from ms fd: %s\n",strerror(errno));
+       return;
+    }
     char *topic = strtok(input, " \n");
     char *msg = strtok(NULL, "\n");
 
     // printf("topic: %s. message: %s\n", topic, msg);
     //special stat case
-    printf("..%s..\n", topic);////////
+    // printf("..%s..\n", topic);////////
     if(strcmp(topic,"stat") == 0){
         uint64_t pubs = atomic_load(&pub_success);
         uint64_t errors = atomic_load(&pub_error);
@@ -167,7 +167,7 @@ void handle_messaging(subscriber_t *subs) {
         return;
     }
     if (!topic || !msg) {
-        printf("Usage: <topic> <message>\n");
+        // printf("Usage: <topic> <message>\n");
         return;
     }
     if( strlen(topic) > MAX_TOPIC_LEN){
@@ -228,9 +228,9 @@ void* microservice_listener_thread(void* arg){
             exit(1);
         }
         while(1){
-            int recvbytes = recv(sockfd, microservice_message, sizeof(inbuf), 0);
+            int recvbytes = recv(sockfd, microservice_message, sizeof(inbuf), MSG_DONTWAIT);
             if(recvbytes < 0){
-                fprintf(stderr, "Thread failed to receive: %s\n",strerror(errno));
+                // fprintf(stderr, "Thread failed to receive: %s\n",strerror(errno));
             }
             if(write(pipe_fds[1],microservice_message,strlen(microservice_message)) < 0){
                 fprintf(stderr, "Thread failed to write to ms fd: %s\n",strerror(errno));
