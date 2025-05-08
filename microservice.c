@@ -17,7 +17,7 @@
 #define DEFAULT_ADDR "127.0.0.1"
 #define ZMQ_ADDR "tcp://127.0.0.1:5556"
 
-#define REQ_COUNT 200000
+#define REQ_COUNT 1000000
 
 double getdetlatimeofday(struct timeval *begin, struct timeval *end) {
     return (end->tv_sec + end->tv_usec * 1.0 / 1000000) -
@@ -152,21 +152,24 @@ int main(int argc, char* argv[]){
     // puts("Parent loop");
     char* message = calloc(MAX_BUFFER_SIZE + MAX_TOPIC_LEN, 1);
     // strncpy(message, topic, MAX_TOPIC_LEN);
+    char* requests[REQ_COUNT];
+    for(int i = 0; i < REQ_COUNT; i++){
+        requests[i] = calloc(MAX_BUFFER_SIZE, 1);
+        num = rand() % topic_count;
+        strncpy(requests[i], topics[num], MAX_TOPIC_LEN);
+        strcat(requests[i], " ");
+        num = rand() % topic_count;
+        strncat(requests[i], messages[num], MAX_TOPIC_LEN);
+        strcat(requests[i], " new message\0");
+    }
+    puts("Done crafting requests");
     while(1){
 START_WHILE:
         // int iterations = (rand() % 500) + 10;
         gettimeofday(&begin, NULL);
         int dropped = 0;
         for(int i = 0; i < REQ_COUNT; i++){
-            memset(message, 0, MAX_BUFFER_SIZE + MAX_TOPIC_LEN);
-            num = rand() % topic_count;
-            strncpy(message, topics[num], MAX_TOPIC_LEN);
-            strcat(message, " ");
-            num = rand() % topic_count;
-            strncat(message, messages[num], MAX_TOPIC_LEN);
-            strcat(message, " new message\0");
-            // printf("Microservice to send: %s\n",message);
-            if(send(conn_fd,message,strlen(message),MSG_NOSIGNAL) < 0){
+            if(send(conn_fd,requests[i],strlen(requests[i]),MSG_NOSIGNAL) < 0){
                 dropped = 1;
                 fprintf(stderr, "Error: Failed to send data. %s.\n", strerror(errno));
                 goto START_WHILE;
@@ -174,15 +177,18 @@ START_WHILE:
                 // continue;
             }
             //some buffering(?) causes requests to not be individual. This fixes(?) that
-            // usleep(300);
+            // usleep(100);
         }
         gettimeofday(&end, NULL);
         double delta = getdetlatimeofday(&begin, &end);
         printf("Finished sending %d requests in %.10f seconds\n",REQ_COUNT,delta);
-        sleep(1);
+        // sleep(1);
     }
 
 EXIT:
+    for(int i = 0; i < REQ_COUNT; i++){
+        free(requests[i]);
+    }
     free(topic);
     close(pub_socket);
     puts("Microservice done");
