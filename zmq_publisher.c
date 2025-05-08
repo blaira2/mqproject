@@ -127,7 +127,7 @@ int main() {
         char *topic = strtok(line, " ");
         char *msg   = strtok(NULL, "\n");
         if (!topic || !msg) {
-            fprintf(stderr, "Usage: <topic> <message>\n");
+            // fprintf(stderr, "Usage: <topic> <message>\n");
             continue;
         }
         int rc;
