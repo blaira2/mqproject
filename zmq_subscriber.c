@@ -4,10 +4,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdatomic.h>
 
 #define MAX_TOPIC 256
 #define MAX_MSG   1024
 #define PORT      5556
+
+static _Atomic uint64_t sub_recv_success = 0;
+static _Atomic uint64_t sub_recv_eagain   = 0; 
+static _Atomic uint64_t sub_recv_fail  = 0; 
+static _Atomic uint64_t pub_send_success = 0;
+static _Atomic uint64_t pub_send_eagain   = 0; 
+static _Atomic uint64_t pub_send_fail  = 0; 
 
 //like ./subscriber_zmq tcp://localhost:5556 news
 int main(int argc, char *argv[]) {
@@ -33,12 +41,38 @@ int main(int argc, char *argv[]) {
 
     char topic[MAX_TOPIC], msg[MAX_MSG];
     while (1) {
-        int n = zmq_recv(sub, topic, sizeof(topic)-1, 0);
-        if (n < 0) break;
-        topic[n] = '\0';
+       int n;
 
-        n = zmq_recv(sub, msg, sizeof(msg)-1, 0);
-        if (n < 0) break;
+        // topic frame
+        n = zmq_recv(sub, topic, sizeof(topic)-1,
+                    ZMQ_DONTWAIT);
+        if (n < 0) {
+            if (errno == EAGAIN) {
+                atomic_fetch_add(&sub_recv_eagain, 1);
+                continue;
+            } else {
+                atomic_fetch_add(&sub_recv_fail, 1);
+                perror("zmq_recv topic");
+                break;
+            }
+        }
+
+        // payload frame
+        n = zmq_recv(sub, msg, sizeof(msg)-1,
+                    ZMQ_DONTWAIT);
+        if (n < 0) {
+            if (errno == EAGAIN) {
+                atomic_fetch_add(&sub_recv_eagain, 1);
+                continue;
+            } else {
+                atomic_fetch_add(&sub_recv_fail, 1);
+                perror("zmq_recv msg");
+                break;
+            }
+        }
+
+        // both frames succeeded!
+        atomic_fetch_add(&sub_recv_success, 1);
         msg[n] = '\0';
 
         // printf("[%s] %s\n", topic, msg);

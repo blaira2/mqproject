@@ -9,11 +9,18 @@
 #include <pthread.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <stdatomic.h>
 
 #define ENDPOINT "tcp://*:5556"
 #define MAX_LINE 1024
-
 #define MICROSERVICE_PORT 4444
+
+static _Atomic uint64_t pub_send_success = 0;
+static _Atomic uint64_t pub_send_eagain   = 0; 
+static _Atomic uint64_t pub_send_fail  = 0; 
+static _Atomic uint64_t sub_recv_success = 0;
+static _Atomic uint64_t sub_recv_eagain   = 0; 
+static _Atomic uint64_t sub_recv_fail  = 0; 
 
 char* microservice_message;
 int microservice_fd = -1;
@@ -59,6 +66,28 @@ void* microservice_listener_thread(void* arg){
 }
 
 
+void print_stats(){
+    uint64_t send_success =atomic_load(&pub_send_success);
+    uint64_t send = atomic_load(&pub_send_eagain);
+    uint64_t send_fail = atomic_load(&pub_send_fail);
+    uint64_t recv_success =atomic_load(&sub_recv_success);
+    uint64_t recv = atomic_load(&sub_recv_eagain);
+    uint64_t recv_fail = atomic_load(&sub_recv_fail);
+    printf(
+      "PUB send success:  %lu\n"
+      "PUB send not ready:  %lu\n"
+      "PUB send other:  %lu\n"
+      "SUB recv success: %lu\n"
+      "SUB recv not ready: %lu\n"
+      "SUB recv other: %lu\n",
+      (unsigned long)send_success,
+      (unsigned long)send,
+      (unsigned long)send_fail,
+      (unsigned long)recv_success,
+      (unsigned long)recv,
+      (unsigned long)recv_fail);
+}
+
 int main() {
     void *ctx = zmq_ctx_new();
     void *pub = zmq_socket(ctx, ZMQ_PUB);
@@ -75,7 +104,7 @@ int main() {
         free(microservice_message);
         return 1;
     }
-    puts("zmq aboit to loop");
+    puts("zmq about to loop");
     //publisher loop
     while (1) {
         char line[MAX_LINE];
@@ -101,17 +130,30 @@ int main() {
             fprintf(stderr, "Usage: <topic> <message>\n");
             continue;
         }
-        // send topic frame
-        if (zmq_send(pub, topic, strlen(topic), ZMQ_SNDMORE) < 0) {
-            perror("zmq_send topic");
-            break;
+        int rc;
+
+        // topic frame
+        rc = zmq_send(pub, topic, strlen(topic),
+                    ZMQ_SNDMORE | ZMQ_DONTWAIT);
+        if (rc >= 0) {
+            atomic_fetch_add(&pub_send_success, 1);
+        } else if (errno == EAGAIN) {
+            atomic_fetch_add(&pub_send_eagain, 1);
+        } else {
+            atomic_fetch_add(&pub_send_fail, 1);
         }
-        // send payload frame
-        if (zmq_send(pub, msg, strlen(msg), 0) < 0) {
-            perror("zmq_send msg");
-            break;
+        // payload frame
+        rc = zmq_send(pub, msg, strlen(msg),
+                    ZMQ_DONTWAIT);
+        if (rc >= 0) {
+            atomic_fetch_add(&pub_send_success, 1);
+        } else if (errno == EAGAIN) {
+            atomic_fetch_add(&pub_send_eagain, 1);
+        } else {
+            atomic_fetch_add(&pub_send_fail, 1);
         }
     }
+
 
     // while (fgets(line, sizeof(line), stdin)) {
     //     // Expect input: "<topic> <message>\n"
