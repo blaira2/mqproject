@@ -104,14 +104,14 @@ int main() {
         free(microservice_message);
         return 1;
     }
-    puts("zmq about to loop");
+    // puts("zmq about to loop");
     //publisher loop
     while (1) {
         char line[MAX_LINE];
         memset(line, 0, sizeof(line));
         if(pipe_fds[0] == STDIN_FILENO){
             //try again to ensure that only messages from microservice are received
-            puts("pipe fd 0");
+            // puts("pipe fd 0");
             if(pipe(pipe_fds) < 0){
                 fprintf(stderr,"Pipe failed: %s\n",strerror(errno));
                 exit(1);

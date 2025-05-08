@@ -17,7 +17,7 @@
 #define DEFAULT_ADDR "127.0.0.1"
 #define ZMQ_ADDR "tcp://127.0.0.1:5556"
 
-#define REQ_COUNT 500000
+#define REQ_COUNT 1000000
 
 double getdetlatimeofday(struct timeval *begin, struct timeval *end) {
     return (end->tv_sec + end->tv_usec * 1.0 / 1000000) -
